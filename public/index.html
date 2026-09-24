@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f5f4f0">
+<title>Квиз</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .wrap {
+    max-width: 520px;
+    margin: 0 auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; }
+  .pill {
+    background: var(--card);
+    box-shadow: var(--shadow);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .screen { flex: 1; display: flex; flex-direction: column; }
+  .center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 14px; }
+  h1 { font-size: 32px; line-height: 1.12; letter-spacing: -.025em; margin: 0; }
+  h2 { font-size: 24px; line-height: 1.2; letter-spacing: -.02em; margin: 0; }
+  .sub { color: var(--muted); font-size: 17px; margin: 0; }
+
+  /* Вход */
+  #join .center { align-items: stretch; text-align: left; gap: 10px; }
+  #join form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+  #join .err { color: var(--bad); font-size: 15px; min-height: 20px; margin: 0; }
+
+  /* Лобби */
+  .avatar {
+    width: 96px; height: 96px;
+    border-radius: 30px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    display: grid; place-items: center;
+    font-size: 52px;
+    margin-bottom: 6px;
+  }
+  .emojis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 4px; }
+  .emo {
+    aspect-ratio: 1;
+    border: 0;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .7);
+    font-size: 26px;
+    line-height: 1;
+    display: grid; place-items: center;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .emo:active { transform: scale(.92); }
+  .emo.on { background: var(--card); box-shadow: inset 0 0 0 2px var(--ink), var(--shadow); transform: scale(1.05); }
+  .label { font-size: 14px; font-weight: 600; color: var(--muted); margin: 10px 0 0; }
+  .explain {
+    margin-top: 16px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .75);
+    box-shadow: var(--shadow);
+    font-size: 15.5px;
+    line-height: 1.5;
+    color: #3a3a44;
+  }
+  .explain b { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .who-emoji { margin-right: 6px; }
+  .linkbtn { background: none; border: 0; color: var(--muted); font-size: 15px; text-decoration: underline; text-underline-offset: 3px; padding: 8px; }
+
+  /* Вопрос */
+  .qmeta { display: flex; justify-content: space-between; align-items: baseline; margin: 18px 0 10px; }
+  .qmeta .secs { font-weight: 700; font-size: 17px; }
+  .qtext { font-size: 23px; font-weight: 700; line-height: 1.25; letter-spacing: -.015em; margin: 18px 0 16px; }
+  .qimg { width: 100%; max-height: 32vh; object-fit: contain; border-radius: 14px; background: var(--card); margin-bottom: 16px; }
+  .opts { display: flex; flex-direction: column; gap: 10px; }
+  .opt {
+    display: flex; align-items: center; gap: 14px;
+    width: 100%;
+    min-height: 64px;
+    padding: 12px 16px 12px 12px;
+    border: 0;
+    border-radius: 16px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    text-align: left;
+    font-size: 17px;
+    font-weight: 600;
+    transition: transform .12s ease, opacity .25s ease, box-shadow .2s ease, background .2s ease;
+  }
+  .opt:active { transform: scale(.98); }
+  .opt .shape { width: 42px; height: 42px; }
+  .opt .t { flex: 1; overflow-wrap: anywhere; }
+  .opt .mark { font-size: 20px; font-weight: 700; }
+  .opts.locked .opt { cursor: default; transform: none; }
+  .opts.locked .opt:not(.chosen) { opacity: .4; }
+  .opt.chosen { box-shadow: inset 0 0 0 2.5px var(--c), var(--shadow); }
+  .opts.revealed .opt { opacity: .4; }
+  .opts.revealed .opt.right { opacity: 1; background: var(--good-soft); box-shadow: inset 0 0 0 2.5px var(--good); }
+  .opts.revealed .opt.wrong { opacity: 1; background: var(--bad-soft); box-shadow: inset 0 0 0 2.5px var(--bad); }
+  .status { text-align: center; color: var(--muted); margin-top: 18px; font-size: 16px; min-height: 22px; }
+
+  /* Результат */
+  .verdict { border-radius: 22px; padding: 26px 20px; text-align: center; margin: 18px 0 16px; }
+  .verdict.good { background: var(--good); color: #fff; }
+  .verdict.bad { background: var(--ink); color: #fff; }
+  .verdict .big { font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
+  .verdict .small { opacity: .8; margin-top: 4px; font-size: 16px; }
+  .standing { display: flex; justify-content: center; gap: 22px; margin-top: 18px; color: var(--muted); font-size: 15px; }
+  .standing b { color: var(--ink); font-size: 18px; display: block; }
+
+  .myplace { font-size: 56px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+  .section-title { margin: 26px 0 12px; }
+  #final .podium { margin: 18px 0 22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo"><span class="logo-mark">?</span>Квиз</span>
+    <span class="pill num" id="scorePill" hidden></span>
+  </header>
+
+  <!-- Вход -->
+  <section class="screen" id="join" hidden>
+    <div class="center">
+      <p class="eyebrow">Добро пожаловать</p>
+      <h1>Как вас зовут?</h1>
+      <p class="sub">Эмодзи и никнейм увидят все участники в таблице лидеров.</p>
+      <form id="joinForm" autocomplete="off">
+        <p class="label">Выберите эмодзи</p>
+        <div class="emojis" id="emojis"></div>
+        <p class="label">Никнейм</p>
+        <input class="input" id="nameInput" maxlength="20" placeholder="Ваш никнейм" autocapitalize="words" enterkeyhint="go">
+        <p class="err" id="joinErr"></p>
+        <button class="btn wide" id="joinBtn" type="submit">Войти в игру</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Лобби -->
+  <section class="screen" id="lobby" hidden>
+    <div class="center">
+      <div class="avatar pop" id="avatar"></div>
+      <h1 id="hello"></h1>
+      <p class="sub">Вы в игре. Ждём, когда ведущий начнёт.</p>
+      <div class="dots" style="margin-top:8px"><span></span><span></span><span></span></div>
+      <p class="sub num" id="lobbyCount" style="font-size:15px;margin-top:8px"></p>
+      <button class="linkbtn" id="renameBtn">Сменить эмодзи или никнейм</button>
+    </div>
+  </section>
+
+  <!-- Вопрос и ответ -->
+  <section class="screen" id="question" hidden>
+    <div class="qmeta">
+      <span class="eyebrow num" id="qNum"></span>
+      <span class="secs num" id="qSecs"></span>
+    </div>
+    <div class="timebar" id="qBar"><i></i></div>
+    <div id="verdict"></div>
+    <div class="qtext" id="qText"></div>
+    <img class="qimg" id="qImg" alt="" hidden>
+    <div class="opts" id="opts"></div>
+    <div id="qExplain"></div>
+    <p class="status" id="qStatus"></p>
+  </section>
+
+  <!-- Промежуточная таблица -->
+  <section class="screen" id="board" hidden>
+    <div class="center" style="flex:0;margin-top:28px">
+      <p class="eyebrow">Ваше место</p>
+      <div class="myplace num" id="boardPlace"></div>
+      <p class="sub num" id="boardScore"></p>
+    </div>
+    <h2 class="section-title">Таблица лидеров</h2>
+    <div class="board" id="boardList"></div>
+    <p class="status">Следующий вопрос скоро <span class="dots"><span></span><span></span><span></span></span></p>
+  </section>
+
+  <!-- Финал -->
+  <section class="screen" id="final" hidden>
+    <div class="center" style="flex:0;margin-top:20px">
+      <p class="eyebrow">Игра окончена</p>
+      <h1 id="finalTitle"></h1>
+      <p class="sub num" id="finalScore"></p>
+    </div>
+    <div class="podium" id="finalPodium"></div>
+    <div class="board" id="finalList"></div>
+  </section>
+</div>
+
+<div class="conn" id="conn" hidden>Переподключение…</div>
+
+<script src="/shapes.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('ru-RU');
+const EMOJIS = ['😀', '😎', '🤓', '🥳', '😇', '🤠', '🦊', '🐻', '🐼', '🦁', '🐯', '🐨', '🐸', '🦉', '🐬', '🦋', '🐝', '🐢', '🌻', '🌟', '🔥', '🍀', '🎯', '🚀'];
+let emoji = localStorage.getItem('quiz-emoji') || EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+
+let id = sessionStorage.getItem('quiz-id');
+let es = null;
+let state = null;
+let renderedKey = '';
+let pendingChoice = null;
+let timerEnd = 0;
+let timerTotal = 1;
+let raf = 0;
+let connTimer = 0;
+
+function show(name) {
+  for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== name;
+}
+
+function toast(text) {
+  document.querySelectorAll('.toast').forEach((t) => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+function setOnline(ok) {
+  clearTimeout(connTimer);
+  if (ok) $('#conn').hidden = true;
+  else connTimer = setTimeout(() => ($('#conn').hidden = false), 1500);
+}
+
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Ошибка сети');
+  return data;
+}
+
+// ---------- Подключение ----------
+
+function connect() {
+  if (es) es.close();
+  if (!id) return showJoin();
+  es = new EventSource('/events?player=' + encodeURIComponent(id));
+  es.onmessage = (e) => { setOnline(true); render(JSON.parse(e.data)); };
+  es.onerror = () => {
+    setOnline(false);
+    if (es && es.readyState === EventSource.CLOSED) setTimeout(connect, 2000);
+  };
+  es.addEventListener('unknown', () => { es.close(); es = null; forget(); showJoin(); });
+  es.addEventListener('kicked', () => { es.close(); es = null; forget(); showJoin(); toast('Ведущий удалил вас из игры'); });
+}
+
+function forget() {
+  id = null;
+  sessionStorage.removeItem('quiz-id');
+  state = null;
+  renderedKey = '';
+  $('#scorePill').hidden = true;
+}
+
+document.addEventListener('visibilitychange', () => {
+  // iPhone рвёт соединение при блокировке экрана — переподключаемся при возвращении
+  if (document.visibilityState === 'visible' && id && (!es || es.readyState === EventSource.CLOSED)) connect();
+});
+window.addEventListener('pageshow', (e) => { if (e.persisted && id) connect(); });
+
+// ---------- Вход ----------
+
+function showJoin(prefill) {
+  show('join');
+  const input = $('#nameInput');
+  input.value = prefill ?? localStorage.getItem('quiz-name') ?? '';
+  if (state?.me?.emoji) emoji = state.me.emoji;
+  renderEmojis();
+  $('#joinErr').textContent = '';
+  if (window.matchMedia('(pointer: fine)').matches) input.focus();
+}
+
+function renderEmojis() {
+  $('#emojis').innerHTML = EMOJIS.map((e) => `<button type="button" class="emo ${e === emoji ? 'on' : ''}" data-e="${e}">${e}</button>`).join('');
+}
+
+$('#emojis').addEventListener('click', (e) => {
+  const b = e.target.closest('.emo');
+  if (!b) return;
+  emoji = b.dataset.e;
+  renderEmojis();
+});
+
+$('#joinForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#nameInput').value.trim();
+  if (name.length < 2) return ($('#joinErr').textContent = 'Минимум 2 символа');
+  $('#joinBtn').disabled = true;
+  try {
+    const res = await api('/api/join', { id, name, emoji });
+    id = res.id;
+    sessionStorage.setItem('quiz-id', id);
+    localStorage.setItem('quiz-name', res.name);
+    localStorage.setItem('quiz-emoji', emoji);
+    $('#nameInput').blur();
+    renderedKey = '';
+    connect();
+  } catch (err) {
+    $('#joinErr').textContent = err.message;
+  } finally {
+    $('#joinBtn').disabled = false;
+  }
+});
+
+$('#renameBtn').addEventListener('click', () => {
+  renderedKey = 'join';
+  showJoin(state?.me?.name || '');
+});
+
+// ---------- Отрисовка ----------
+
+function render(s) {
+  state = s;
+  const me = s.me;
+  const pill = $('#scorePill');
+  pill.hidden = s.phase === 'lobby';
+  pill.textContent = fmt(me.score) + ' очк.';
+
+  if (renderedKey === 'join' && s.phase === 'lobby') return; // пользователь меняет ник
+  const key = s.phase + ':' + s.index;
+
+  if (s.phase === 'lobby') {
+    show('lobby');
+    $('#avatar').textContent = me.emoji;
+    $('#hello').textContent = 'Привет, ' + me.name + '!';
+    $('#lobbyCount').textContent = 'Участников: ' + s.playersCount;
+  } else if (s.phase === 'question' || s.phase === 'reveal') {
+    renderQuestion(s, key !== renderedKey);
+  } else if (s.phase === 'leaderboard') {
+    show('board');
+    $('#boardPlace').textContent = me.rank + '-е';
+    $('#boardScore').textContent = fmt(me.score) + ' очков';
+    $('#boardList').innerHTML = rows(s.leaderboard, me.id);
+  } else if (s.phase === 'final') {
+    show('final');
+    $('#finalTitle').textContent = me.rank === 1 ? 'Вы победили! 🏆' : 'Вы на ' + me.rank + '-м месте';
+    $('#finalScore').textContent = fmt(me.score) + ' очков';
+    $('#finalPodium').innerHTML = podium(s.leaderboard);
+    $('#finalList').innerHTML = rows(s.leaderboard.slice(3), me.id);
+  }
+  renderedKey = key;
+}
+
+function renderQuestion(s, fresh) {
+  show('question');
+  const q = s.question;
+  const revealed = s.phase === 'reveal';
+  if (fresh) {
+    pendingChoice = null;
+    $('#qExplain').innerHTML = '';
+    window.scrollTo(0, 0);
+    $('#qNum').textContent = 'Вопрос ' + (s.index + 1) + ' из ' + s.total;
+    $('#qText').textContent = q.text;
+    const img = $('#qImg');
+    img.hidden = !q.image;
+    if (q.image) img.src = q.image;
+    $('#opts').innerHTML = q.answers.map((a, i) =>
+      `<button class="opt c${i}" data-i="${i}">${shape(i)}<span class="t">${esc(a)}</span><span class="mark"></span></button>`
+    ).join('');
+  }
+
+  const chosen = s.myAnswer ?? pendingChoice;
+  const opts = $('#opts');
+  opts.classList.toggle('locked', chosen != null || revealed);
+  opts.classList.toggle('revealed', revealed);
+  opts.querySelectorAll('.opt').forEach((b, i) => {
+    b.classList.toggle('chosen', i === chosen);
+    b.classList.toggle('right', revealed && i === q.correct);
+    b.classList.toggle('wrong', revealed && i === chosen && i !== q.correct);
+    b.querySelector('.mark').textContent = revealed ? (i === q.correct ? '✓' : i === chosen ? '✕' : '') : '';
+  });
+
+  const v = $('#verdict');
+  if (revealed) {
+    stopTimer();
+    $('#qBar').hidden = true;
+    $('#qSecs').textContent = '';
+    const r = s.result;
+    const good = r.correct;
+    const title = good ? 'Верно!' : r.answered ? 'Неверно' : 'Время вышло';
+    const small = good ? '+' + fmt(r.points) + ' очков' : 'Правильный ответ отмечен ниже';
+    if (fresh || !v.innerHTML) {
+      v.innerHTML = `<div class="verdict pop ${good ? 'good' : 'bad'}"><div class="big">${title}</div><div class="small">${small}</div></div>`;
+    }
+    $('#qExplain').innerHTML = q.explanation && !$('#qExplain').innerHTML
+      ? `<div class="explain fade-in"><b>Пояснение</b>${esc(q.explanation)}</div>`
+      : $('#qExplain').innerHTML;
+    $('#qStatus').innerHTML = `<span class="standing"><span><b class="num">${s.me.rank}-е</b>место</span><span><b class="num">${fmt(s.me.score)}</b>очков</span></span>`;
+  } else {
+    v.innerHTML = '';
+    $('#qExplain').innerHTML = '';
+    $('#qBar').hidden = false;
+    startTimer(q.remaining, q.time * 1000);
+    $('#qStatus').textContent = chosen != null ? 'Ответ принят — ждём остальных' : '';
+  }
+}
+
+$('#opts').addEventListener('click', async (e) => {
+  const b = e.target.closest('.opt');
+  if (!b || !state || state.phase !== 'question' || state.myAnswer != null || pendingChoice != null) return;
+  const choice = Number(b.dataset.i);
+  pendingChoice = choice;
+  renderQuestion(state, false);
+  try {
+    await api('/api/answer', { id, choice });
+  } catch (err) {
+    if (state.myAnswer == null) pendingChoice = null;
+    renderQuestion(state, false);
+    toast(err.message);
+  }
+});
+
+// ---------- Таймер ----------
+
+function startTimer(remaining, total) {
+  timerEnd = performance.now() + remaining;
+  timerTotal = total;
+  if (!raf) tick();
+}
+function stopTimer() { cancelAnimationFrame(raf); raf = 0; }
+function tick() {
+  const left = Math.max(0, timerEnd - performance.now());
+  $('#qBar i').style.transform = `scaleX(${left / timerTotal})`;
+  $('#qBar').classList.toggle('low', left < 5000);
+  $('#qSecs').textContent = Math.ceil(left / 1000) + ' с';
+  raf = left > 0 ? requestAnimationFrame(tick) : 0;
+  if (!left && state?.phase === 'question' && state.myAnswer == null && pendingChoice == null) {
+    $('#opts').classList.add('locked');
+    $('#qStatus').textContent = 'Время вышло';
+  }
+}
+
+// ---------- Таблицы ----------
+
+function rows(list, meId) {
+  return list.map((p) => `
+    <div class="row fade-in ${p.id === meId ? 'me' : ''} ${p.rank <= 3 ? 'top' + p.rank : ''}">
+      <span class="pos num">${p.rank}</span>
+      <span class="name"><span class="who-emoji">${p.emoji}</span>${esc(p.name)}</span>
+      ${p.lastPoints ? `<span class="delta num">+${fmt(p.lastPoints)}</span>` : ''}
+      <span class="score num">${fmt(p.score)}</span>
+    </div>`).join('');
+}
+
+function podium(list) {
+  return list.slice(0, 3).map((p, i) => `
+    <div class="place p${i + 1} pop" style="animation-delay:${(2 - i) * 0.25}s">
+      <div style="font-size:34px;line-height:1">${p.emoji}</div>
+      <div class="who">${esc(p.name)}</div>
+      <div class="pts num">${fmt(p.score)}</div>
+      <div class="step">${i + 1}</div>
+    </div>`).join('');
+}
+
+connect();
+</script>
+</body>
+</html>

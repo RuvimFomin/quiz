@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: quiz
+    runtime: node
+    plan: free
+    buildCommand: "true"
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: HOST_PASSWORD
+        sync: false

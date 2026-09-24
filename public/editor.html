@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Квиз — вопросы</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .top {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 20px 14px;
+    background: rgba(245, 244, 240, .88);
+    backdrop-filter: saturate(1.4) blur(14px);
+    -webkit-backdrop-filter: saturate(1.4) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top .right { display: flex; align-items: center; gap: 12px; }
+  .saved { font-size: 14px; color: var(--muted); }
+  .saved.dirty { color: var(--o1); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 20px calc(60px + env(safe-area-inset-bottom, 0px)); }
+  h1 { font-size: 32px; letter-spacing: -.025em; margin: 8px 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+
+  .q { padding: 20px; margin-bottom: 16px; }
+  .q-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .q-tools { display: flex; gap: 4px; }
+  .icon {
+    width: 36px; height: 36px;
+    border: 0; border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 17px;
+    display: grid; place-items: center;
+  }
+  .icon:hover { background: var(--soft); color: var(--ink); }
+  .icon:disabled { opacity: .25; background: transparent; cursor: default; }
+  .icon.del:hover { background: var(--bad-soft); color: var(--bad); }
+
+  textarea.input { height: auto; min-height: 76px; padding: 14px 16px; resize: vertical; line-height: 1.35; font-size: 17px; font-weight: 600; }
+  .answers { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+  .ans { display: flex; align-items: center; gap: 10px; }
+  .ans .input { height: 48px; font-size: 16px; }
+  .ans.correct .input { border-color: var(--good); background: var(--good-soft); }
+  .radio { flex: none; border: 0; padding: 0; background: none; border-radius: 12px; }
+  .radio .shape { width: 40px; height: 40px; }
+  .ans.correct .radio .shape { --c: var(--good); }
+  .ans.correct .radio .shape::before { opacity: 1; }
+  .ans.correct .radio .shape svg { display: none; }
+  .ans.correct .radio .shape::after { content: '✓'; position: relative; color: #fff; font-weight: 800; font-size: 18px; }
+  textarea.explain-input { min-height: 64px; font-size: 15px; font-weight: 400; margin-bottom: 12px; }
+  .hint { font-size: 13px; color: var(--muted); margin: -4px 0 10px; }
+
+  .q-foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select.input { height: 40px; width: auto; font-size: 15px; padding: 0 12px; border-radius: 10px; }
+  .thumb { position: relative; margin-top: 12px; }
+  .thumb img { max-width: 100%; max-height: 220px; border-radius: 12px; display: block; }
+  .thumb .icon { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.55); color: #fff; }
+
+  .add {
+    width: 100%; height: 64px;
+    border: 2px dashed var(--line); border-radius: var(--radius);
+    background: transparent; color: var(--muted);
+    font-weight: 600; font-size: 17px;
+  }
+  .add:hover { border-color: var(--faint); color: var(--ink); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+</style>
+</head>
+<body>
+<div class="top">
+  <a class="btn small ghost" id="back" href="/host">← К игре</a>
+  <div class="right">
+    <span class="saved" id="saved"></span>
+    <button class="btn small" id="save">Сохранить</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="eyebrow">Редактор</p>
+  <h1>Вопросы квиза</h1>
+  <p class="lead">Нажмите на фигуру слева от варианта, чтобы отметить правильный ответ. Изменения применяются после «Сохранить».</p>
+  <div id="list"></div>
+  <button class="add" id="add">+ Добавить вопрос</button>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+
+<script src="/shapes.js"></script>
+<script src="/hostauth.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const LETTERS = ['1', '2', '3', '4', '5', '6'];
+const TIMES = [10, 15, 20, 30, 45, 60, 90];
+const HEADERS = { 'Content-Type': 'application/json', 'X-Host-Key': KEY };
+
+let questions = [];
+let dirty = false;
+let uploadFor = -1;
+
+
+function toast(text) {
+  document.querySelectorAll('.toast').forEach((t) => t.remove());
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function setDirty(v) {
+  dirty = v;
+  const el = $('#saved');
+  el.textContent = v ? 'Есть несохранённые изменения' : 'Всё сохранено';
+  el.classList.toggle('dirty', v);
+}
+
+async function load() {
+  const r = await fetch('/api/questions', { headers: HEADERS });
+  const data = await r.json();
+  if (!r.ok) return toast(data.error || 'Нет доступа');
+  questions = data.questions;
+  render();
+  setDirty(false);
+}
+
+function render() {
+  const list = $('#list');
+  if (!questions.length) {
+    list.innerHTML = '<div class="empty">Пока нет ни одного вопроса</div>';
+    return;
+  }
+  list.innerHTML = questions.map((q, qi) => `
+    <div class="card q" data-q="${qi}">
+      <div class="q-head">
+        <span class="eyebrow">Вопрос ${qi + 1}</span>
+        <div class="q-tools">
+          <button class="icon" data-act="up" ${qi === 0 ? 'disabled' : ''} title="Выше">↑</button>
+          <button class="icon" data-act="down" ${qi === questions.length - 1 ? 'disabled' : ''} title="Ниже">↓</button>
+          <button class="icon del" data-act="remove" title="Удалить вопрос">✕</button>
+        </div>
+      </div>
+      <textarea class="input" data-field="question" placeholder="Текст вопроса">${esc(q.question)}</textarea>
+      <div class="answers">
+        ${q.answers.map((a, ai) => `
+          <div class="ans ${ai === q.correct ? 'correct' : ''}">
+            <button class="radio c${ai}" data-act="correct" data-a="${ai}" title="Сделать правильным">${shape(ai)}</button>
+            <input class="input" data-field="answer" data-a="${ai}" value="${esc(a)}" placeholder="Вариант ${LETTERS[ai]}">
+            ${q.answers.length > 2 ? `<button class="icon del" data-act="delans" data-a="${ai}" title="Убрать вариант">✕</button>` : ''}
+          </div>`).join('')}
+      </div>
+      <textarea class="input explain-input" data-field="explanation" placeholder="Пояснение — покажется после ответа (необязательно)">${esc(q.explanation || '')}</textarea>
+      <div class="q-foot">
+        ${q.answers.length < 6 ? '<button class="btn small ghost" data-act="addans">+ Вариант</button>' : ''}
+        <select class="input" data-field="time">
+          ${TIMES.map((t) => `<option value="${t}" ${t === q.time ? 'selected' : ''}>${t} секунд</option>`).join('')}
+        </select>
+        <button class="btn small ghost" data-act="image">${q.image ? 'Заменить картинку' : '+ Картинка'}</button>
+      </div>
+      ${q.image ? `<div class="thumb"><img src="/images/${encodeURIComponent(q.image)}" alt=""><button class="icon" data-act="noimage" title="Убрать картинку">✕</button></div>` : ''}
+    </div>`).join('');
+}
+
+$('#list').addEventListener('input', (e) => {
+  const card = e.target.closest('[data-q]');
+  if (!card) return;
+  const q = questions[card.dataset.q];
+  const f = e.target.dataset.field;
+  if (f === 'question') q.question = e.target.value;
+  if (f === 'answer') q.answers[e.target.dataset.a] = e.target.value;
+  if (f === 'time') q.time = Number(e.target.value);
+  if (f === 'explanation') q.explanation = e.target.value;
+  setDirty(true);
+});
+
+$('#list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const qi = Number(b.closest('[data-q]').dataset.q);
+  const q = questions[qi];
+  const ai = Number(b.dataset.a);
+  switch (b.dataset.act) {
+    case 'up': [questions[qi - 1], questions[qi]] = [questions[qi], questions[qi - 1]]; break;
+    case 'down': [questions[qi + 1], questions[qi]] = [questions[qi], questions[qi + 1]]; break;
+    case 'remove':
+      if (b.dataset.armed !== '1') {
+        b.dataset.armed = '1';
+        b.textContent = '?';
+        b.title = 'Нажмите ещё раз, чтобы удалить';
+        setTimeout(() => { b.dataset.armed = ''; b.textContent = '✕'; }, 2500);
+        return;
+      }
+      questions.splice(qi, 1);
+      break;
+    case 'correct': q.correct = ai; break;
+    case 'addans': q.answers.push(''); break;
+    case 'delans':
+      q.answers.splice(ai, 1);
+      if (q.correct === ai) q.correct = 0;
+      else if (q.correct > ai) q.correct--;
+      break;
+    case 'image': uploadFor = qi; $('#file').click(); return;
+    case 'noimage': q.image = ''; break;
+  }
+  render();
+  setDirty(true);
+});
+
+$('#add').addEventListener('click', () => {
+  questions.push({ question: '', answers: ['', '', '', ''], correct: 0, time: 20, image: '', explanation: '' });
+  render();
+  setDirty(true);
+  const cards = document.querySelectorAll('.q');
+  const last = cards[cards.length - 1];
+  last.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  last.querySelector('textarea').focus({ preventScroll: true });
+});
+
+// Картинки уменьшаем перед загрузкой, чтобы они быстро открывались на телефонах
+function shrink(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      if (file.type === 'image/gif') return resolve(reader.result);
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/jpeg', 0.86));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+$('#file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file || uploadFor < 0) return;
+  try {
+    const data = await shrink(file);
+    const r = await fetch('/api/upload', { method: 'POST', headers: HEADERS, body: JSON.stringify({ data }) });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.error);
+    questions[uploadFor].image = res.image;
+    render();
+    setDirty(true);
+  } catch (err) {
+    toast(err.message || 'Не удалось загрузить картинку');
+  }
+});
+
+$('#save').addEventListener('click', async () => {
+  const cleaned = questions.map((q) => ({ ...q, answers: q.answers.map((a) => a.trim()) }));
+  const r = await fetch('/api/questions', { method: 'PUT', headers: HEADERS, body: JSON.stringify({ questions: cleaned }) });
+  const res = await r.json().catch(() => ({}));
+  if (!r.ok) return toast(res.error || 'Не удалось сохранить');
+  setDirty(false);
+  toast(`Сохранено: ${res.count} ${res.count === 1 ? 'вопрос' : 'вопросов'}`);
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); $('#save').click(); }
+});
+
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+requireHost(load);
+</script>
+</body>
+</html>
