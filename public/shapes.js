@@ -10,3 +10,10 @@ const SHAPES = [
 function shape(i) {
   return `<span class="shape c${i}"><svg viewBox="0 0 24 24">${SHAPES[i % SHAPES.length]}</svg></span>`;
 }
+
+// Аватар участника: фото, если есть, иначе эмодзи
+function avatar(p, cls = '') {
+  return p.photo
+    ? `<img class="ava ${cls}" src="${p.photo}" alt="">`
+    : `<span class="${cls}">${p.emoji}</span>`;
+}

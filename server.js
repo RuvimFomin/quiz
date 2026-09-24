@@ -100,6 +100,7 @@ function leaderboard() {
     id: p.id,
     name: p.name,
     emoji: p.emoji,
+    photo: p.photo,
     score: p.score,
     lastPoints: p.lastPoints,
     rank: i + 1,
@@ -130,7 +131,7 @@ function playerView(p) {
     index: game.index,
     total: game.questions.length,
     playersCount: players.size,
-    me: { id: p.id, name: p.name, emoji: p.emoji, score: p.score, rank: rankOf(p.id) },
+    me: { id: p.id, name: p.name, emoji: p.emoji, photo: p.photo, score: p.score, rank: rankOf(p.id) },
     question: inQuestion ? questionPayload(game.phase === 'reveal') : null,
     myAnswer: a ? a.choice : null,
     result: game.phase === 'reveal' ? { correct: p.lastCorrect, points: p.lastPoints, answered: !!a } : null,
@@ -158,6 +159,7 @@ function hostView() {
       id: p.id,
       name: p.name,
       emoji: p.emoji,
+      photo: p.photo,
       score: p.score,
       connected: isConnected(p),
       answered: game.answers.has(p.id),
@@ -382,6 +384,17 @@ function openStream(req, res) {
   req.socket.setTimeout(0);
 }
 
+// Фото участников малой группы (public/people). Если имя совпадает — вместо эмодзи показываем фото.
+const PHOTOS = {
+  марк: 'mark.jpg',
+  анастасия: 'anastasia.jpg',
+  пашка: 'pashka.jpg',
+  полина: 'polina.jpg',
+  алексей: 'aleksey.jpg',
+  лигия: 'ligia.jpg',
+};
+const photoFor = (name) => (PHOTOS[name.toLowerCase()] ? '/people/' + PHOTOS[name.toLowerCase()] : '');
+
 const DEFAULT_EMOJI = ['😀', '😎', '🦊', '🐻', '🐼', '🦁', '🐯', '🐨', '🐸', '🦉', '🐬', '🦋'];
 
 function cleanEmoji(e) {
@@ -415,6 +428,7 @@ async function handleApi(req, res, url) {
       if (clash) return json(res, 409, { error: 'Это имя уже занято' });
       existing.name = name;
       existing.emoji = emoji;
+      existing.photo = photoFor(name);
       broadcast();
       return json(res, 200, { id: existing.id, name });
     }
@@ -429,14 +443,14 @@ async function handleApi(req, res, url) {
     }
     if (players.size >= MAX_PLAYERS) return json(res, 403, { error: 'Комната заполнена' });
     const id = crypto.randomUUID();
-    players.set(id, { id, name, emoji, score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null, streams: new Set() });
+    players.set(id, { id, name, emoji, photo: photoFor(name), score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null, streams: new Set() });
     broadcast();
     return json(res, 200, { id, name });
   }
 
   if (route === '/api/names' && req.method === 'GET') {
     const taken = [...players.values()].filter(isConnected).map((p) => p.name.toLowerCase());
-    return json(res, 200, { taken });
+    return json(res, 200, { taken, photos: Object.fromEntries(Object.entries(PHOTOS).map(([k, v]) => [k, '/people/' + v])) });
   }
 
   if (route === '/api/answer' && req.method === 'POST') {

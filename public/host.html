@@ -295,7 +295,7 @@ function renderLobby(s, fresh) {
   }
   $('#pcount').textContent = s.players.length;
   $('#chips').innerHTML = s.players.length
-    ? s.players.map((p) => `<button class="chip ${seenPlayers.has(p.id) ? '' : 'pop'} ${p.connected ? '' : 'off'} ${kickArmed === p.id ? 'confirm' : ''}" data-id="${p.id}" title="Нажмите, чтобы удалить"><span class="emoji">${p.emoji}</span>${kickArmed === p.id ? 'Удалить ' + esc(p.name) + '?' : esc(p.name)}</button>`).join('')
+    ? s.players.map((p) => `<button class="chip ${seenPlayers.has(p.id) ? '' : 'pop'} ${p.connected ? '' : 'off'} ${kickArmed === p.id ? 'confirm' : ''}" data-id="${p.id}" title="Нажмите, чтобы удалить">${avatar(p, 'emoji')}${kickArmed === p.id ? 'Удалить ' + esc(p.name) + '?' : esc(p.name)}</button>`).join('')
     : `<div class="empty">Пока никого нет<span class="dots" style="margin-left:6px"><span></span><span></span><span></span></span></div>`;
   s.players.forEach((p) => seenPlayers.add(p.id));
   const n = s.players.length;
@@ -335,7 +335,7 @@ function renderQuestion(s, fresh) {
 
   const online = s.players.filter((p) => p.connected || p.answered);
   $('#answeredText').textContent = `Ответили ${s.answeredCount} из ${online.length}`;
-  $('#answeredChips').innerHTML = online.map((p) => `<span class="chip ${p.answered ? 'done' : 'off'}" style="font-size:15px;padding:8px 14px"><span class="emoji">${p.emoji}</span>${esc(p.name)}</span>`).join('');
+  $('#answeredChips').innerHTML = online.map((p) => `<span class="chip ${p.answered ? 'done' : 'off'}" style="font-size:15px;padding:8px 14px">${avatar(p, 'emoji')}${esc(p.name)}</span>`).join('');
 
   const grid = $('#answers');
   grid.classList.toggle('revealed', revealed);
@@ -373,13 +373,13 @@ function renderBoard(s, fresh) {
       <h1>${final ? 'Победители' : 'Таблица лидеров'}</h1>
       ${final ? `<div class="podium">${list.slice(0, 3).map((p, i) => `
         <div class="place p${i + 1} ${fresh ? 'pop' : ''}" style="animation-delay:${(2 - i) * 0.5}s">
-          <div style="font-size:52px;line-height:1">${p.emoji}</div>
+          <div style="font-size:52px;line-height:1">${avatar(p)}</div>
           <div class="who">${esc(p.name)}</div><div class="pts num">${fmt(p.score)}</div><div class="step">${i + 1}</div>
         </div>`).join('')}</div>` : ''}
       <div class="board">${shown.map((p, i) => `
         <div class="row ${fresh ? 'fade-in' : ''} ${p.rank <= 3 ? 'top' + p.rank : ''}" style="animation-delay:${i * 0.05}s">
           <span class="pos num">${p.rank}</span>
-          <span class="name"><span class="emoji" style="margin-right:8px">${p.emoji}</span>${esc(p.name)}${p.connected ? '' : ' <span class="muted" style="font-weight:400;font-size:14px">· офлайн</span>'}</span>
+          <span class="name"><span class="emoji" style="margin-right:8px">${avatar(p)}</span>${esc(p.name)}${p.connected ? '' : ' <span class="muted" style="font-weight:400;font-size:14px">· офлайн</span>'}</span>
           ${!final && p.lastPoints ? `<span class="delta num">+${fmt(p.lastPoints)}</span>` : ''}
           <span class="score num">${fmt(p.score)}</span>
         </div>`).join('')}</div>

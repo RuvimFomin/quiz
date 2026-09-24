@@ -105,6 +105,11 @@
   }
   .explain b { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
   .who-emoji { margin-right: 6px; }
+  .avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+  .name-chip { display: inline-flex; align-items: center; gap: 8px; }
+  .name-chip .ava { width: 28px; height: 28px; margin-left: -8px; }
+  .photo-note { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 15px; margin-top: 6px; }
+  .photo-note img { width: 52px; height: 52px; border-radius: 16px; object-fit: cover; box-shadow: var(--shadow); }
   .linkbtn { background: none; border: 0; color: var(--muted); font-size: 15px; text-decoration: underline; text-underline-offset: 3px; padding: 8px; }
 
   /* Вопрос */
@@ -170,8 +175,11 @@
         <div class="names" id="names"></div>
         <p class="label">или введите другое</p>
         <input class="input" id="nameInput" maxlength="20" placeholder="Ваше имя" autocapitalize="words" enterkeyhint="go">
-        <p class="label">Выберите эмодзи</p>
-        <div class="emojis" id="emojis"></div>
+        <div id="emojiBlock">
+          <p class="label">Выберите эмодзи</p>
+          <div class="emojis" id="emojis"></div>
+        </div>
+        <div class="photo-note" id="photoNote" hidden></div>
         <p class="err" id="joinErr"></p>
         <button class="btn wide" id="joinBtn" type="submit">Войти в игру</button>
       </form>
@@ -323,6 +331,7 @@ function showJoin(prefill) {
 
 const NAMES = ['Алексей', 'Анастасия', 'Марк', 'Биата', 'Лигия', 'Пашка', 'Вероника', 'Арсений', 'Полина'];
 let taken = [];
+let photos = {};
 let takenTimer = 0;
 
 function renderNames() {
@@ -330,8 +339,14 @@ function renderNames() {
   const mine = (state?.me?.name || '').toLowerCase();
   $('#names').innerHTML = NAMES.map((n) => {
     const busy = taken.includes(n.toLowerCase()) && n.toLowerCase() !== mine;
-    return `<button type="button" class="name-chip ${n.toLowerCase() === current ? 'on' : ''}" data-n="${n}" ${busy ? 'disabled title="Уже в игре"' : ''}>${n}</button>`;
+    const ph = photos[n.toLowerCase()];
+    return `<button type="button" class="name-chip ${n.toLowerCase() === current ? 'on' : ''}" data-n="${n}" ${busy ? 'disabled title="Уже в игре"' : ''}>${ph ? `<img class="ava" src="${ph}" alt="">` : ''}${n}</button>`;
   }).join('');
+  // У кого есть фото — эмодзи не нужен, показываем фото
+  const ph = photos[current];
+  $('#emojiBlock').hidden = !!ph;
+  $('#photoNote').hidden = !ph;
+  if (ph) $('#photoNote').innerHTML = `<img src="${ph}" alt="">Вместо эмодзи будет ваше фото`;
 }
 
 // Пока открыт экран входа — раз в 3 секунды узнаём, какие имена уже заняты
@@ -339,7 +354,9 @@ async function refreshTaken() {
   clearTimeout(takenTimer);
   if ($('#join').hidden) return;
   try {
-    taken = (await (await fetch('/api/names')).json()).taken || [];
+    const data = await (await fetch('/api/names')).json();
+    taken = data.taken || [];
+    photos = data.photos || {};
     renderNames();
   } catch (_) {}
   takenTimer = setTimeout(refreshTaken, 3000);
@@ -408,7 +425,7 @@ function render(s) {
 
   if (s.phase === 'lobby') {
     show('lobby');
-    $('#avatar').textContent = me.emoji;
+    $('#avatar').innerHTML = me.photo ? `<img src="${me.photo}" alt="">` : me.emoji;
     $('#hello').textContent = 'Привет, ' + me.name + '!';
     $('#lobbyCount').textContent = 'Участников: ' + s.playersCount;
   } else if (s.phase === 'question' || s.phase === 'reveal') {
@@ -523,7 +540,7 @@ function rows(list, meId) {
   return list.map((p) => `
     <div class="row fade-in ${p.id === meId ? 'me' : ''} ${p.rank <= 3 ? 'top' + p.rank : ''}">
       <span class="pos num">${p.rank}</span>
-      <span class="name"><span class="who-emoji">${p.emoji}</span>${esc(p.name)}</span>
+      <span class="name"><span class="who-emoji">${avatar(p)}</span>${esc(p.name)}</span>
       ${p.lastPoints ? `<span class="delta num">+${fmt(p.lastPoints)}</span>` : ''}
       <span class="score num">${fmt(p.score)}</span>
     </div>`).join('');
@@ -532,7 +549,7 @@ function rows(list, meId) {
 function podium(list) {
   return list.slice(0, 3).map((p, i) => `
     <div class="place p${i + 1} pop" style="animation-delay:${(2 - i) * 0.25}s">
-      <div style="font-size:34px;line-height:1">${p.emoji}</div>
+      <div style="font-size:34px;line-height:1">${avatar(p)}</div>
       <div class="who">${esc(p.name)}</div>
       <div class="pts num">${fmt(p.score)}</div>
       <div class="step">${i + 1}</div>

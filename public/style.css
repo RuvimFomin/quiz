@@ -281,3 +281,6 @@ body::after {
 .authbox h2 { margin: 0 0 6px; font-size: 26px; letter-spacing: -.02em; }
 .authbox .eyebrow { margin: 0; }
 .authbox .err { color: var(--bad); font-size: 14px; min-height: 18px; margin: 0; }
+
+/* Фото участника вместо эмодзи */
+.ava { width: 1.35em; height: 1.35em; border-radius: 50%; object-fit: cover; vertical-align: middle; display: inline-block; }
