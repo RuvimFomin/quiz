@@ -145,6 +145,7 @@
   <span class="logo"><span class="logo-mark">?</span>Квиз</span>
   <span class="info num" id="info"></span>
   <div class="tools">
+    <button class="btn small ghost" id="soundBtn" title="Звук на экране ведущего"></button>
     <a class="btn small ghost" id="editorLink" href="/editor" target="_blank">Вопросы</a>
     <button class="btn small ghost" id="resetBtn" hidden>Сбросить игру</button>
   </div>
@@ -162,6 +163,7 @@
 <script src="/qrcode.js"></script>
 <script src="/shapes.js"></script>
 <script src="/hostauth.js"></script>
+<script src="/sound.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -215,10 +217,12 @@ function connect() {
 // ---------- Отрисовка ----------
 
 function render(s) {
+  const prev = state;
   state = s;
   const key = s.phase + ':' + s.index;
   const fresh = key !== renderedKey;
   renderedKey = key;
+  playSounds(prev, s, fresh);
 
   $('#info').textContent = s.phase === 'lobby' ? `Вопросов: ${s.total}` : s.phase === 'final' ? 'Итоги' : `Вопрос ${s.index + 1} из ${s.total}`;
   $('#resetBtn').hidden = s.phase === 'lobby';
@@ -228,6 +232,28 @@ function render(s) {
   else if (s.phase === 'question' || s.phase === 'reveal') renderQuestion(s, fresh);
   else renderBoard(s, fresh);
 }
+
+function playSounds(prev, s, fresh) {
+  if (!prev) return; // первое подключение — без звуков
+  if (fresh) {
+    if (s.phase === 'question') Sound.question();
+    else if (s.phase === 'reveal') Sound.reveal();
+    else if (s.phase === 'leaderboard') Sound.board();
+    else if (s.phase === 'final') Sound.final();
+    return;
+  }
+  const had = new Set(prev.players.map((p) => p.id));
+  if (s.phase === 'lobby' && s.players.some((p) => !had.has(p.id))) Sound.join();
+  if (s.phase === 'question' && s.answeredCount > prev.answeredCount) Sound.answer();
+}
+
+function updateSoundBtn() {
+  $('#soundBtn').textContent = Sound.enabled ? '🔊 Звук' : '🔇 Звук';
+}
+updateSoundBtn();
+$('#soundBtn').addEventListener('click', () => { Sound.toggle(); updateSoundBtn(); });
+
+let lastTickSec = 0;
 
 function setPrimary(label, action, disabled = false) {
   $('#actionbar').hidden = !label;
@@ -379,7 +405,12 @@ function tick() {
   if (!ring) return (raf = 0);
   const left = Math.max(0, timerEnd - performance.now());
   ring.querySelector('.fg').style.strokeDashoffset = RING * (1 - left / timerTotal);
-  ring.querySelector('span').textContent = Math.ceil(left / 1000);
+  const sec = Math.ceil(left / 1000);
+  ring.querySelector('span').textContent = sec;
+  if (sec !== lastTickSec) {
+    if (sec >= 1 && sec <= 5 && lastTickSec > sec) Sound.tick(sec === 1);
+    lastTickSec = sec;
+  }
   ring.classList.toggle('low', left < 5000);
   raf = left > 0 ? requestAnimationFrame(tick) : 0;
 }
