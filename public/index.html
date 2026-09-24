@@ -51,9 +51,23 @@
     font-size: 52px;
     margin-bottom: 6px;
   }
-  .emojis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 4px; }
+  /* Эмодзи в одну строку с горизонтальной прокруткой */
+  .emojis {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 -20px;
+    padding: 4px 20px 8px;
+  }
+  .emojis::-webkit-scrollbar { display: none; }
   .emo {
-    aspect-ratio: 1;
+    flex: none;
+    width: 52px;
+    height: 52px;
+    scroll-snap-align: start;
     border: 0;
     border-radius: 14px;
     background: rgba(255, 255, 255, .7);
@@ -151,7 +165,6 @@
     <div class="center">
       <p class="eyebrow">Добро пожаловать на малую группу у Марка</p>
       <h1>Как вас зовут?</h1>
-      <p class="sub">Эмодзи и имя увидят все участники в таблице лидеров.</p>
       <form id="joinForm" autocomplete="off">
         <p class="label">Выберите своё имя</p>
         <div class="names" id="names"></div>
@@ -299,6 +312,9 @@ function showJoin(prefill) {
   input.value = prefill ?? localStorage.getItem('quiz-name') ?? '';
   if (state?.me?.emoji) emoji = state.me.emoji;
   renderEmojis();
+  const row = $('#emojis');
+  const on = row.querySelector('.on');
+  if (on) row.scrollLeft = on.getBoundingClientRect().left - row.getBoundingClientRect().left - row.clientWidth / 2 + on.offsetWidth / 2;
   renderNames();
   refreshTaken();
   $('#joinErr').textContent = '';
@@ -347,7 +363,9 @@ $('#emojis').addEventListener('click', (e) => {
   const b = e.target.closest('.emo');
   if (!b) return;
   emoji = b.dataset.e;
+  const x = $('#emojis').scrollLeft;
   renderEmojis();
+  $('#emojis').scrollLeft = x; // не сбрасываем прокрутку при выборе
 });
 
 $('#joinForm').addEventListener('submit', async (e) => {
