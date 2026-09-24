@@ -65,6 +65,20 @@
   .emo:active { transform: scale(.92); }
   .emo.on { background: var(--card); box-shadow: inset 0 0 0 2px var(--ink), var(--shadow); transform: scale(1.05); }
   .label { font-size: 14px; font-weight: 600; color: var(--muted); margin: 10px 0 0; }
+  .names { display: flex; flex-wrap: wrap; gap: 8px; }
+  .name-chip {
+    height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .7);
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .2s ease;
+  }
+  .name-chip:active { transform: scale(.95); }
+  .name-chip.on { background: var(--ink); color: #fff; }
+  .name-chip:disabled { opacity: .35; text-decoration: line-through; cursor: default; }
   .explain {
     margin-top: 16px;
     padding: 16px 18px;
@@ -137,12 +151,14 @@
     <div class="center">
       <p class="eyebrow">Добро пожаловать на малую группу у Марка</p>
       <h1>Как вас зовут?</h1>
-      <p class="sub">Эмодзи и никнейм увидят все участники в таблице лидеров.</p>
+      <p class="sub">Эмодзи и имя увидят все участники в таблице лидеров.</p>
       <form id="joinForm" autocomplete="off">
+        <p class="label">Выберите своё имя</p>
+        <div class="names" id="names"></div>
+        <p class="label">или введите другое</p>
+        <input class="input" id="nameInput" maxlength="20" placeholder="Ваше имя" autocapitalize="words" enterkeyhint="go">
         <p class="label">Выберите эмодзи</p>
         <div class="emojis" id="emojis"></div>
-        <p class="label">Никнейм</p>
-        <input class="input" id="nameInput" maxlength="20" placeholder="Ваш никнейм" autocapitalize="words" enterkeyhint="go">
         <p class="err" id="joinErr"></p>
         <button class="btn wide" id="joinBtn" type="submit">Войти в игру</button>
       </form>
@@ -157,7 +173,7 @@
       <p class="sub">Вы в игре. Ждём, когда ведущий начнёт.</p>
       <div class="dots" style="margin-top:8px"><span></span><span></span><span></span></div>
       <p class="sub num" id="lobbyCount" style="font-size:15px;margin-top:8px"></p>
-      <button class="linkbtn" id="renameBtn">Сменить эмодзи или никнейм</button>
+      <button class="linkbtn" id="renameBtn">Сменить эмодзи или имя</button>
     </div>
   </section>
 
@@ -283,9 +299,45 @@ function showJoin(prefill) {
   input.value = prefill ?? localStorage.getItem('quiz-name') ?? '';
   if (state?.me?.emoji) emoji = state.me.emoji;
   renderEmojis();
+  renderNames();
+  refreshTaken();
   $('#joinErr').textContent = '';
   if (window.matchMedia('(pointer: fine)').matches) input.focus();
 }
+
+const NAMES = ['Алексей', 'Анастасия', 'Марк', 'Биата', 'Лигия', 'Пашка', 'Вероника', 'Арсений', 'Полина'];
+let taken = [];
+let takenTimer = 0;
+
+function renderNames() {
+  const current = $('#nameInput').value.trim().toLowerCase();
+  const mine = (state?.me?.name || '').toLowerCase();
+  $('#names').innerHTML = NAMES.map((n) => {
+    const busy = taken.includes(n.toLowerCase()) && n.toLowerCase() !== mine;
+    return `<button type="button" class="name-chip ${n.toLowerCase() === current ? 'on' : ''}" data-n="${n}" ${busy ? 'disabled title="Уже в игре"' : ''}>${n}</button>`;
+  }).join('');
+}
+
+// Пока открыт экран входа — раз в 3 секунды узнаём, какие имена уже заняты
+async function refreshTaken() {
+  clearTimeout(takenTimer);
+  if ($('#join').hidden) return;
+  try {
+    taken = (await (await fetch('/api/names')).json()).taken || [];
+    renderNames();
+  } catch (_) {}
+  takenTimer = setTimeout(refreshTaken, 3000);
+}
+
+$('#names').addEventListener('click', (e) => {
+  const b = e.target.closest('.name-chip');
+  if (!b || b.disabled) return;
+  $('#nameInput').value = b.dataset.n;
+  $('#joinErr').textContent = '';
+  renderNames();
+});
+
+$('#nameInput').addEventListener('input', renderNames);
 
 function renderEmojis() {
   $('#emojis').innerHTML = EMOJIS.map((e) => `<button type="button" class="emo ${e === emoji ? 'on' : ''}" data-e="${e}">${e}</button>`).join('');

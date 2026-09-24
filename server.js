@@ -409,10 +409,10 @@ async function handleApi(req, res, url) {
 
     const name = cleanName(body.name);
     const emoji = cleanEmoji(body.emoji);
-    if (name.length < 2) return json(res, 400, { error: 'Никнейм — минимум 2 символа' });
+    if (name.length < 2) return json(res, 400, { error: 'Имя — минимум 2 символа' });
     if (existing) {
       const clash = [...players.values()].find((p) => p.id !== existing.id && p.name.toLowerCase() === name.toLowerCase());
-      if (clash) return json(res, 409, { error: 'Этот никнейм уже занят' });
+      if (clash) return json(res, 409, { error: 'Это имя уже занято' });
       existing.name = name;
       existing.emoji = emoji;
       broadcast();
@@ -425,13 +425,18 @@ async function handleApi(req, res, url) {
         sameName.emoji = emoji;
         return json(res, 200, { id: sameName.id, name: sameName.name });
       }
-      return json(res, 409, { error: 'Этот никнейм уже занят' });
+      return json(res, 409, { error: 'Это имя уже занято' });
     }
     if (players.size >= MAX_PLAYERS) return json(res, 403, { error: 'Комната заполнена' });
     const id = crypto.randomUUID();
     players.set(id, { id, name, emoji, score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null, streams: new Set() });
     broadcast();
     return json(res, 200, { id, name });
+  }
+
+  if (route === '/api/names' && req.method === 'GET') {
+    const taken = [...players.values()].filter(isConnected).map((p) => p.name.toLowerCase());
+    return json(res, 200, { taken });
   }
 
   if (route === '/api/answer' && req.method === 'POST') {
