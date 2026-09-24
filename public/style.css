@@ -103,14 +103,12 @@ button { cursor: pointer; touch-action: manipulation; }
   letter-spacing: -.01em;
 }
 .logo-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  background: var(--ink);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 15px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 1px 3px rgba(20, 20, 30, .15);
 }
 
 .shape {

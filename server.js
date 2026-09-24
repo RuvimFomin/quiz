@@ -315,7 +315,7 @@ function joinUrls() {
   for (const [name, list] of Object.entries(os.networkInterfaces())) {
     if (/^(utun|tun|tap|bridge|vmnet|vboxnet|docker|awdl|llw)/i.test(name)) continue;
     for (const i of list || []) {
-      if (i.family === 'IPv4' && !i.internal) ips.push(i.address);
+      if (i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.')) ips.push(i.address);
     }
   }
   return ips.sort((a, b) => priority(a) - priority(b)).map((ip) => `http://${ip}:${PORT}`);
@@ -543,7 +543,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   const urls = joinUrls();
   const line = '─'.repeat(52);
-  console.log(`\n${line}\n  🎉  Квиз запущен\n${line}`);
+  console.log(`\n${line}\n  🦩  RF-Quiz запущен\n${line}`);
   console.log(`\n  Экран ведущего (откройте на этом компьютере):\n     http://localhost:${PORT}/host`);
   console.log(`\n  Редактор вопросов:\n     http://localhost:${PORT}/editor`);
   if (urls.length) {
