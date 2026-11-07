@@ -505,7 +505,7 @@ function renderQuestion(s, fresh) {
     $('#qBar').hidden = false;
     if (s.phase === 'question') startTimer(q.remaining, q.time * 1000);
     else { stopTimer(); $('#qSecs').textContent = s.phase === 'paused' ? Math.ceil(q.remaining / 1000) + ' с · пауза' : 'Стоп'; }
-    $('#qStatus').textContent = s.phase === 'paused' ? 'Пауза — ждём ведущего' : s.phase === 'closed' ? 'Приём ответов завершён — ждём раскрытия' : chosen != null ? '✓ Ответ принят — ждём остальных' : 'Выберите один ответ';
+    $('#qStatus').textContent = s.phase === 'paused' ? 'Пауза — ждём ведущего' : s.phase === 'closed' ? 'Приём ответов завершён — ждём раскрытия' : s.myAnswer != null ? '✓ Ответ принят — ждём остальных' : pendingChoice != null ? 'Отправляем ответ…' : 'Выберите один ответ';
   }
 }
 

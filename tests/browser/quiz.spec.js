@@ -55,8 +55,21 @@ test('Три игрока проходят 25 вопросов; ведущий, 
       const overflow = await people[0].evaluate(() => document.documentElement.scrollWidth > innerWidth);
       expect(overflow).toBe(false);
     }
+    if (i === 0) {
+      let releaseAnswer;
+      await people[0].route('**/api/answer', async route => {
+        await new Promise(resolve => { releaseAnswer = resolve; });
+        await route.continue();
+      });
+      await people[0].locator('.opt').nth(q.correct).click();
+      await expect(people[0].locator('#qStatus')).toHaveText('Отправляем ответ…');
+      await expect.poll(() => typeof releaseAnswer).toBe('function');
+      releaseAnswer();
+      await expect(people[0].locator('#qStatus')).toContainText('Ответ принят');
+      await people[0].unroute('**/api/answer');
+    }
     for (let j = 0; j < 3; j++) {
-      await people[j].locator('.opt').nth(j === 1 ? (q.correct + 1) % 4 : q.correct).click();
+      if (!(i === 0 && j === 0)) await people[j].locator('.opt').nth(j === 1 ? (q.correct + 1) % 4 : q.correct).click();
       await expect(people[j].locator('#qStatus')).toContainText('Ответ принят');
       await expect(people[j].locator('.opt').first()).toBeDisabled();
     }
