@@ -149,6 +149,8 @@ async function cleanup() {
       }));
       check('Q' + (i + 1) + ': answers locked after tap on all 50 phones', (await Promise.all(phones.map(({ page }) => page.locator('.opt').first().isDisabled()))).every(Boolean));
       if (i === 0) {
+        console.log('50 answers confirmed; testing five interrupted connections with timer paused.');
+        await host.locator('#pauseBtn').click(); await waitPhones('paused', i);
         const recovering = phones.slice(0, 5);
         const before = await Promise.all(recovering.map(({ page }) => state(page)));
         for (const p of recovering) p.offline = true;
@@ -161,6 +163,7 @@ async function cleanup() {
         const after = await Promise.all(recovering.map(({ page }) => state(page)));
         check('Five phones recover after forced SSE interruption and offline network', after.every((s, j) => s.answer === before[j].answer && s.name === before[j].name && s.emoji === before[j].emoji));
         for (const p of recovering) p.offline = false;
+        await host.locator('#pauseBtn').click(); await waitPhones('question', i);
       }
       await host.locator('#primary').click(); await expect(host.locator('#primary')).toHaveText('Раскрыть ответ'); await waitPhones('closed', i);
       await host.locator('#primary').click(); await waitPhones('reveal', i);
