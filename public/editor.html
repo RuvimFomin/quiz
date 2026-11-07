@@ -8,12 +8,13 @@
 <link rel="apple-touch-icon" href="/icon.jpg">
 <meta name="apple-mobile-web-app-title" content="RF-Quiz">
 <link rel="stylesheet" href="/style.css">
+<script src="/theme.js" defer></script>
 <style>
   .top {
     position: sticky; top: 0; z-index: 10;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     padding: calc(14px + env(safe-area-inset-top, 0px)) 20px 14px;
-    background: rgba(245, 244, 240, .88);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
     backdrop-filter: saturate(1.4) blur(14px);
     -webkit-backdrop-filter: saturate(1.4) blur(14px);
     border-bottom: 1px solid var(--line);
@@ -68,25 +69,49 @@
   }
   .add:hover { border-color: var(--faint); color: var(--ink); }
   .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  #outline { position: fixed; left: 0; top: 84px; bottom: 0; overflow: auto; width: 250px; padding: 16px; background: var(--card); border-right: 1px solid var(--line); }
+  .outline-item { display: block; width: 100%; border: 0; background: transparent; border-radius: 10px; padding: 12px; margin-bottom: 6px; text-align: left; color: var(--muted); font-size: 14px; }
+  .outline-item.active { background: var(--soft); color: var(--accent); }
+  .wrap { margin-left: 270px; max-width: 1100px; }
+  .preview { padding: 24px; margin-bottom: 24px; }
+  .preview h2 { font-size: 26px; line-height: 1.2; overflow-wrap: anywhere; }
+  .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .preview .answer { border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start; font-size: 16px; overflow-wrap: anywhere; }
+  .preview .answer span { min-width: 0; }
+  .ans textarea.input { min-height: 86px; font-weight: 400; }
+  @media (max-width: 900px) {
+    #outline { position: static; width: auto; max-height: 200px; }
+    .wrap { margin: 0 auto; }
+    .top { flex-wrap: wrap; }
+    .top .right { flex-wrap: wrap; gap: 8px; }
+    .preview-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
 <div class="top">
   <a class="btn small ghost" id="back" href="/host">← К игре</a>
   <div class="right">
+    <button class="btn small ghost" data-theme-toggle aria-label="Переключить тему">◐</button>
+    <button class="btn small ghost" id="importBtn">Импорт JSON</button>
+    <button class="btn small ghost" id="exportBtn">Экспорт JSON</button>
     <span class="saved" id="saved"></span>
     <button class="btn small" id="save">Сохранить</button>
   </div>
 </div>
 
+<aside id="outline" aria-label="Список вопросов"></aside>
 <div class="wrap">
   <p class="eyebrow">Редактор</p>
   <h1>Вопросы квиза</h1>
-  <p class="lead">Нажмите на фигуру слева от варианта, чтобы отметить правильный ответ. Изменения применяются после «Сохранить».</p>
+  <label>Название квиза<input class="input" id="quizTitle" maxlength="200" aria-label="Название квиза"></label>
+  <p class="lead">Нажмите на букву слева от варианта, чтобы отметить правильный ответ. Изменения применяются после «Сохранить».</p>
+  <section class="card preview" id="preview" aria-label="Предпросмотр слайда"></section>
   <div id="list"></div>
   <button class="add" id="add">+ Добавить вопрос</button>
 </div>
 
+<input type="file" id="jsonFile" accept="application/json,.json" hidden>
 <input type="file" id="file" accept="image/*" hidden>
 
 <script src="/shapes.js"></script>
@@ -94,13 +119,14 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const LETTERS = ['1', '2', '3', '4', '5', '6'];
-const TIMES = [10, 15, 20, 30, 45, 60, 90];
+const LETTERS = ['А', 'Б', 'В', 'Г'];
+const TIMES = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300];
 const HEADERS = { 'Content-Type': 'application/json', 'X-Host-Key': KEY };
 
 let questions = [];
 let dirty = false;
 let uploadFor = -1;
+let selected = 0;
 
 
 function toast(text) {
@@ -124,6 +150,7 @@ async function load() {
   const data = await r.json();
   if (!r.ok) return toast(data.error || 'Нет доступа');
   questions = data.questions;
+  $('#quizTitle').value = data.title || '';
   render();
   setDirty(false);
 }
@@ -134,8 +161,11 @@ function render() {
     list.innerHTML = '<div class="empty">Пока нет ни одного вопроса</div>';
     return;
   }
+  selected = Math.min(selected, questions.length - 1);
+  $('#outline').innerHTML = questions.map((q, i) => `<button class="outline-item ${i === selected ? 'active' : ''}" data-select="${i}"><b>${i + 1}</b> ${esc(q.question || 'Новый вопрос')}</button>`).join('');
+  renderPreview();
   list.innerHTML = questions.map((q, qi) => `
-    <div class="card q" data-q="${qi}">
+    <div class="card q" data-q="${qi}" ${qi !== selected ? 'hidden' : ''}>
       <div class="q-head">
         <span class="eyebrow">Вопрос ${qi + 1}</span>
         <div class="q-tools">
@@ -144,20 +174,21 @@ function render() {
           <button class="icon del" data-act="remove" title="Удалить вопрос">✕</button>
         </div>
       </div>
-      <textarea class="input" data-field="question" placeholder="Текст вопроса">${esc(q.question)}</textarea>
+      <input class="input" data-field="category" value="${esc(q.category || '')}" aria-label="Тематический раздел" placeholder="Тематический раздел">
+      <textarea class="input" data-field="question" aria-label="Текст вопроса" placeholder="Текст вопроса">${esc(q.question)}</textarea>
       <div class="answers">
         ${q.answers.map((a, ai) => `
           <div class="ans ${ai === q.correct ? 'correct' : ''}">
             <button class="radio c${ai}" data-act="correct" data-a="${ai}" title="Сделать правильным">${shape(ai)}</button>
-            <input class="input" data-field="answer" data-a="${ai}" value="${esc(a)}" placeholder="Вариант ${LETTERS[ai]}">
-            ${q.answers.length > 2 ? `<button class="icon del" data-act="delans" data-a="${ai}" title="Убрать вариант">✕</button>` : ''}
+            <textarea class="input" data-field="answer" data-a="${ai}" aria-label="Вариант ${LETTERS[ai]}" placeholder="Вариант ${LETTERS[ai]}">${esc(a)}</textarea>
+
           </div>`).join('')}
       </div>
       <textarea class="input explain-input" data-field="explanation" placeholder="Пояснение — покажется после ответа (необязательно)">${esc(q.explanation || '')}</textarea>
       <div class="q-foot">
-        ${q.answers.length < 6 ? '<button class="btn small ghost" data-act="addans">+ Вариант</button>' : ''}
+
         <select class="input" data-field="time">
-          ${TIMES.map((t) => `<option value="${t}" ${t === q.time ? 'selected' : ''}>${t} секунд</option>`).join('')}
+          ${[...new Set([...TIMES, q.time])].sort((a, b) => a - b).map((t) => `<option value="${t}" ${t === q.time ? 'selected' : ''}>${t} секунд</option>`).join('')}
         </select>
         <button class="btn small ghost" data-act="image">${q.image ? 'Заменить картинку' : '+ Картинка'}</button>
       </div>
@@ -170,10 +201,12 @@ $('#list').addEventListener('input', (e) => {
   if (!card) return;
   const q = questions[card.dataset.q];
   const f = e.target.dataset.field;
+  if (f === 'category') q.category = e.target.value;
   if (f === 'question') q.question = e.target.value;
   if (f === 'answer') q.answers[e.target.dataset.a] = e.target.value;
   if (f === 'time') q.time = Number(e.target.value);
   if (f === 'explanation') q.explanation = e.target.value;
+  renderPreview();
   setDirty(true);
 });
 
@@ -184,8 +217,8 @@ $('#list').addEventListener('click', (e) => {
   const q = questions[qi];
   const ai = Number(b.dataset.a);
   switch (b.dataset.act) {
-    case 'up': [questions[qi - 1], questions[qi]] = [questions[qi], questions[qi - 1]]; break;
-    case 'down': [questions[qi + 1], questions[qi]] = [questions[qi], questions[qi + 1]]; break;
+    case 'up': [questions[qi - 1], questions[qi]] = [questions[qi], questions[qi - 1]]; selected--; break;
+    case 'down': [questions[qi + 1], questions[qi]] = [questions[qi], questions[qi + 1]]; selected++; break;
     case 'remove':
       if (b.dataset.armed !== '1') {
         b.dataset.armed = '1';
@@ -211,7 +244,8 @@ $('#list').addEventListener('click', (e) => {
 });
 
 $('#add').addEventListener('click', () => {
-  questions.push({ question: '', answers: ['', '', '', ''], correct: 0, time: 20, image: '', explanation: '' });
+  questions.push({ id: Math.max(0, ...questions.map(q => Number(q.id) || 0)) + 1, category: '', question: '', answers: ['', '', '', ''], correct: 0, time: 30, image: '', explanation: '' });
+  selected = questions.length - 1;
   render();
   setDirty(true);
   const cards = document.querySelectorAll('.q');
@@ -261,12 +295,16 @@ $('#file').addEventListener('change', async (e) => {
 });
 
 $('#save').addEventListener('click', async () => {
+  $('#save').disabled = true;
+  try {
   const cleaned = questions.map((q) => ({ ...q, answers: q.answers.map((a) => a.trim()) }));
-  const r = await fetch('/api/questions', { method: 'PUT', headers: HEADERS, body: JSON.stringify({ questions: cleaned }) });
+  const r = await fetch('/api/questions', { method: 'PUT', headers: HEADERS, body: JSON.stringify({ title: $('#quizTitle').value, questions: cleaned }) });
   const res = await r.json().catch(() => ({}));
   if (!r.ok) return toast(res.error || 'Не удалось сохранить');
   setDirty(false);
   toast(`Сохранено: ${res.count} ${res.count === 1 ? 'вопрос' : 'вопросов'}`);
+  } catch (e) { toast(e.message || 'Ошибка сети'); }
+  finally { $('#save').disabled = false; }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -275,6 +313,44 @@ document.addEventListener('keydown', (e) => {
 
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
+function renderPreview() {
+  const q = questions[selected];
+  if (!q) { $('#preview').innerHTML = ''; return; }
+  $('#preview').innerHTML = `<p class="eyebrow">Предпросмотр · ${selected + 1} / ${questions.length} · ${q.time} с · ${esc(q.category || '')}</p><h2>${esc(q.question)}</h2><div class="preview-grid">${q.answers.map((a, i) => `<div class="answer c${i}">${shape(i)}<span>${esc(a)}</span></div>`).join('')}</div>`;
+}
+$('#quizTitle').addEventListener('input', () => setDirty(true));
+$('#outline').addEventListener('click', e => {
+  const b = e.target.closest('[data-select]');
+  if (!b) return;
+  selected = Number(b.dataset.select); render(); window.scrollTo(0, 0);
+});
+$('#importBtn').addEventListener('click', () => $('#jsonFile').click());
+$('#jsonFile').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const list = Array.isArray(data) ? data : data.questions;
+    if (!Array.isArray(list) || !list.length || list.length > 200) throw new Error('Нужно от 1 до 200 вопросов');
+    const imported = list.map((q, i) => {
+      const answers = q.answers || q.options;
+      if (!q.question || !Array.isArray(answers) || answers.length !== 4 || answers.some(a => typeof a !== 'string' || !a.trim()) || !Number.isInteger(q.correct) || q.correct < 0 || q.correct > 3) throw new Error(`Проверьте вопрос ${i + 1}`);
+      const time = Number(q.time || data.defaultTimeLimit || 30);
+      if (!Number.isFinite(time) || time < 5 || time > 300) throw new Error(`Время вопроса ${i + 1}: от 5 до 300 секунд`);
+      return { ...q, id: q.id ?? i + 1, answers, time };
+    });
+    const ids = imported.map(q => q.id);
+    if (new Set(ids).size !== ids.length) throw new Error('ID вопросов повторяются');
+    if (typeof data.title === 'string') $('#quizTitle').value = data.title;
+    questions = imported; selected = 0; render(); setDirty(true);
+    toast('Импортировано в редактор. Нажмите «Сохранить», чтобы применить.');
+  } catch (e) { toast(e.message); }
+});
+$('#exportBtn').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ title: $('#quizTitle').value, defaultTimeLimit: 30, questions }, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a'); a.href = url; a.download = 'quiz-questions.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
 requireHost(load);
 </script>
 </body>

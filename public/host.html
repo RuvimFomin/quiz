@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="/icon.jpg">
 <meta name="apple-mobile-web-app-title" content="RF-Quiz">
 <link rel="stylesheet" href="/style.css">
+<script src="/theme.js" defer></script>
 <style>
   body { overflow-x: hidden; }
   .top {
@@ -148,16 +149,26 @@
   <span class="logo"><img class="logo-mark" src="/icon.jpg" alt="">RF-Quiz</span>
   <span class="info num" id="info"></span>
   <div class="tools">
+    <button class="btn small ghost" data-theme-toggle aria-label="Переключить тему">◐</button>
+    <a class="btn small ghost" href="/present" target="_blank" rel="noopener" id="presentLink">Проектор ↗</a>
+    <button class="btn small ghost" id="fullBtn">⛶</button>
+    <button class="btn small ghost" id="teamBtn">Личная игра</button>
+    <button class="btn small ghost" id="finishBtn" hidden>Завершить игру</button>
+    <a class="btn small ghost" id="csvLink" href="/api/results.csv" hidden>CSV ↓</a>
     <button class="btn small ghost" id="soundBtn" title="Звук на экране ведущего"></button>
     <a class="btn small ghost" id="editorLink" href="/editor" target="_blank">Вопросы</a>
     <button class="btn small ghost" id="resetBtn" hidden>Сбросить игру</button>
   </div>
 </div>
 
+<div class="quiz-progress"><i id="quizProgress"></i></div>
 <main class="main" id="main"></main>
 
 <div class="actionbar" id="actionbar" hidden>
   <button class="btn" id="primary"></button>
+  <button class="btn ghost" id="pauseBtn" hidden></button>
+  <button class="btn ghost" id="boardBtn" hidden>Рейтинг</button>
+  <button class="btn ghost" id="hideBoardBtn" hidden></button>
   <span class="hint">или нажмите пробел</span>
 </div>
 
@@ -167,10 +178,14 @@
 <script src="/shapes.js"></script>
 <script src="/hostauth.js"></script>
 <script src="/sound.js"></script>
+<script src="/effects.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('ru-RU');
+const PRESENT = location.pathname === '/present';
+document.body.classList.toggle('present', PRESENT);
+if (PRESENT) document.title = 'RF-Quiz — проектор';
 const RING = 2 * Math.PI * 52;
 
 let state = null;
@@ -204,7 +219,7 @@ async function act(name, body = {}) {
 }
 
 function connect() {
-  const es = new EventSource('/events' + (KEY ? '?key=' + encodeURIComponent(KEY) : ''));
+  const es = new EventSource('/events');
   es.onmessage = (e) => {
     clearTimeout(connTimer);
     $('#conn').hidden = true;
@@ -222,17 +237,27 @@ function connect() {
 function render(s) {
   const prev = state;
   state = s;
-  const key = s.phase + ':' + s.index;
+  const key = s.phase + ':' + s.index + ':' + s.leaderboardHidden + ':' + s.teamMode;
   const fresh = key !== renderedKey;
   renderedKey = key;
   playSounds(prev, s, fresh);
 
   $('#info').textContent = s.phase === 'lobby' ? `Вопросов: ${s.total}` : s.phase === 'final' ? 'Итоги' : `Вопрос ${s.index + 1} из ${s.total}`;
   $('#resetBtn').hidden = s.phase === 'lobby';
+  $('#teamBtn').hidden = s.phase !== 'lobby';
+  $('#teamBtn').textContent = s.teamMode ? '👥 Командная игра' : '🙂 Личная игра';
+  $('#finishBtn').hidden = ['lobby', 'final'].includes(s.phase);
+  $('#csvLink').hidden = s.phase !== 'final';
+  $('#pauseBtn').hidden = !['question', 'paused'].includes(s.phase);
+  $('#pauseBtn').textContent = s.phase === 'paused' ? '▶ Продолжить' : 'Ⅱ Пауза';
+  $('#boardBtn').hidden = s.phase !== 'reveal';
+  $('#hideBoardBtn').hidden = !['reveal', 'leaderboard'].includes(s.phase);
+  $('#hideBoardBtn').textContent = s.leaderboardHidden ? 'Показать рейтинг' : 'Скрыть рейтинг';
+  $('#quizProgress').style.width = ((s.index + 1) / s.total * 100 || 0) + '%';
   $('#editorLink').hidden = !(s.phase === 'lobby' || s.phase === 'final');
 
   if (s.phase === 'lobby') renderLobby(s, fresh);
-  else if (s.phase === 'question' || s.phase === 'reveal') renderQuestion(s, fresh);
+  else if (['question', 'paused', 'closed', 'reveal'].includes(s.phase)) renderQuestion(s, fresh);
   else renderBoard(s, fresh);
 }
 
@@ -240,6 +265,7 @@ function playSounds(prev, s, fresh) {
   if (!prev) return; // первое подключение — без звуков
   if (fresh) {
     if (s.phase === 'question') Sound.question();
+    else if (s.phase === 'closed') Sound.end();
     else if (s.phase === 'reveal') Sound.reveal();
     else if (s.phase === 'leaderboard') Sound.board();
     else if (s.phase === 'final') Sound.final();
@@ -269,16 +295,17 @@ function setPrimary(label, action, disabled = false) {
 function renderLobby(s, fresh) {
   if (fresh) {
     stopTimer();
-    const url = s.joinUrls[0];
+    const baseUrl = s.joinUrls[0] || location.origin;
+    const url = baseUrl + '/play?code=' + s.roomCode;
     $('#main').innerHTML = `
       <div class="lobby fade-in">
         <div class="joinbox">
-          ${s.title ? `<p class="quiz-title">${esc(s.title)}</p>` : ''}
+          ${s.title ? `<p class="eyebrow">Молодёжный квиз · ${s.total} вопросов</p><h1 class="quiz-title">${esc(s.title)}</h1>` : ''}
           <p class="eyebrow">${url && url.startsWith('https') ? 'Откройте на телефоне' : 'Подключайтесь к Wi‑Fi и откройте'}</p>
           ${url
-            ? `<div class="url">${esc(url.replace(/^https?:\/\//, ''))}${s.joinUrls.length > 1 ? `<small>или: ${s.joinUrls.slice(1).map((u) => esc(u.replace(/^https?:\/\//, ''))).join(', ')}</small>` : ''}</div>
+            ? `<div class="url">${esc(baseUrl.replace(/^https?:\/\//, ''))}/play${s.joinUrls.length > 1 ? `<small>или: ${s.joinUrls.slice(1).map((u) => esc(u.replace(/^https?:\/\//, ''))).join(', ')}</small>` : ''}</div>
                <div class="card qr" id="qr"></div>
-               <p class="muted" style="margin:0">Наведите камеру iPhone на QR‑код</p>`
+               <p class="room-code">Код игры <strong>${esc(s.roomCode)}</strong></p><p class="muted" style="margin:0">Наведите камеру телефона на QR-код</p>`
             : `<div class="warn">Компьютер не подключён к Wi‑Fi. Подключитесь к сети и перезапустите сервер.</div>`}
         </div>
         <div>
@@ -293,7 +320,7 @@ function renderLobby(s, fresh) {
       $('#qr').innerHTML = qr.createSvgTag({ cellSize: 8, margin: 0, scalable: true });
     }
   }
-  $('#pcount').textContent = s.players.length;
+  $('#pcount').textContent = s.players.filter(p => p.connected).length;
   $('#chips').innerHTML = s.players.length
     ? s.players.map((p) => `<button class="chip ${seenPlayers.has(p.id) ? '' : 'pop'} ${p.connected ? '' : 'off'} ${kickArmed === p.id ? 'confirm' : ''}" data-id="${p.id}" title="Нажмите, чтобы удалить">${avatar(p, 'emoji')}${kickArmed === p.id ? 'Удалить ' + esc(p.name) + '?' : esc(p.name)}</button>`).join('')
     : `<div class="empty">Пока никого нет<span class="dots" style="margin-left:6px"><span></span><span></span><span></span></span></div>`;
@@ -306,12 +333,12 @@ function renderLobby(s, fresh) {
 function renderQuestion(s, fresh) {
   const q = s.question;
   const revealed = s.phase === 'reveal';
-  if (fresh && (s.phase === 'question' || !$('#answers'))) {
+  if (fresh && (!$('#answers') || state.index !== Number($('#answers').dataset.index))) {
     $('#main').innerHTML = `
       <div class="fade-in">
         <div class="qhead">
           <div>
-            <p class="eyebrow num">Вопрос ${s.index + 1} из ${s.total}</p>
+            <p class="eyebrow num">Вопрос ${s.index + 1} / ${s.total} · ${esc(q.category || '')}</p>
             <div class="qtitle">${esc(q.text)}</div>
           </div>
           <div class="ring" id="ring">
@@ -321,7 +348,7 @@ function renderQuestion(s, fresh) {
         </div>
         <div class="qbody">
           ${q.image ? `<img class="qimg" src="${esc(q.image)}" alt="">` : ''}
-          <div class="grid" id="answers">
+          <div class="grid" id="answers" data-index="${s.index}">
             ${q.answers.map((a, i) => `<div class="answer c${i}"><span class="fill"></span>${shape(i)}<span class="t">${esc(a)}</span><span class="cnt num"></span></div>`).join('')}
           </div>
         </div>
@@ -334,17 +361,18 @@ function renderQuestion(s, fresh) {
   }
 
   const online = s.players.filter((p) => p.connected || p.answered);
-  $('#answeredText').textContent = `Ответили ${s.answeredCount} из ${online.length}`;
+  $('#answeredText').textContent = revealed ? `Правильно ответили: ${s.distribution[q.correct]} из ${s.answeredCount} · Всего участников: ${s.players.length}` : `Ответили ${s.answeredCount} из ${s.players.length}${s.phase === 'paused' ? ' · Пауза' : s.phase === 'closed' ? ' · Приём завершён' : ''}`;
   $('#answeredChips').innerHTML = online.map((p) => `<span class="chip ${p.answered ? 'done' : 'off'}" style="font-size:15px;padding:8px 14px">${avatar(p, 'emoji')}${esc(p.name)}</span>`).join('');
 
   const grid = $('#answers');
   grid.classList.toggle('revealed', revealed);
+  const tallied = ['closed', 'reveal'].includes(s.phase);
   const total = Math.max(1, s.answeredCount);
   grid.querySelectorAll('.answer').forEach((el, i) => {
     el.classList.toggle('right', revealed && i === q.correct);
-    const n = revealed ? s.distribution[i] : 0;
-    el.querySelector('.cnt').textContent = revealed ? n : '';
-    requestAnimationFrame(() => (el.querySelector('.fill').style.width = revealed ? (n / total) * 100 + '%' : '0'));
+    const n = tallied ? s.distribution[i] : 0;
+    el.querySelector('.cnt').textContent = tallied ? `${n} · ${Math.round(n / total * 100)}%` : '';
+    requestAnimationFrame(() => (el.querySelector('.fill').style.width = tallied ? (n / total) * 100 + '%' : '0'));
   });
 
   if (revealed) {
@@ -356,34 +384,39 @@ function renderQuestion(s, fresh) {
       $('#explain').innerHTML = `<div class="explain fade-in"><b>Пояснение</b>${esc(q.explanation)}</div>`;
     }
     const last = s.index >= s.total - 1;
-    setPrimary(last ? 'Показать итоги' : 'Таблица лидеров', () => act('next'));
+    setPrimary(last ? 'Показать итоги' : 'Следующий вопрос', () => act('next'));
   } else {
-    startTimer(q.remaining, q.time * 1000);
-    setPrimary('Показать ответ', () => act('reveal'));
+    if (s.phase === 'question') startTimer(q.remaining, q.time * 1000);
+    else { stopTimer(); $('#ring span').textContent = s.phase === 'paused' ? 'Ⅱ' : '0'; }
+    setPrimary(s.phase === 'closed' ? 'Раскрыть ответ' : 'Завершить приём', () => act(s.phase === 'closed' ? 'reveal' : 'close'));
   }
 }
 
 function renderBoard(s, fresh) {
   stopTimer();
   const final = s.phase === 'final';
-  const list = s.leaderboard;
-  const shown = final ? list.slice(3, 12) : list.slice(0, 10);
+  const list = PRESENT && s.leaderboardHidden && !final ? [] : s.teamMode ? s.teamLeaderboard : s.leaderboard;
+  const shown = final ? list : list.slice(0, 5);
   $('#main').innerHTML = `
     <div class="lb ${fresh ? 'fade-in' : ''}">
-      <h1>${final ? 'Победители' : 'Таблица лидеров'}</h1>
+      <h1>${final ? 'Победители' : PRESENT && s.leaderboardHidden ? 'Сохраним интригу 🤫' : s.teamMode ? 'Командный рейтинг' : 'Пятёрка лидеров'}</h1>
       ${final ? `<div class="podium">${list.slice(0, 3).map((p, i) => `
         <div class="place p${i + 1} ${fresh ? 'pop' : ''}" style="animation-delay:${(2 - i) * 0.5}s">
           <div style="font-size:52px;line-height:1">${avatar(p)}</div>
           <div class="who">${esc(p.name)}</div><div class="pts num">${fmt(p.score)}</div><div class="step">${i + 1}</div>
         </div>`).join('')}</div>` : ''}
       <div class="board">${shown.map((p, i) => `
-        <div class="row ${fresh ? 'fade-in' : ''} ${p.rank <= 3 ? 'top' + p.rank : ''}" style="animation-delay:${i * 0.05}s">
+        <div data-player="${p.id}" class="row ${fresh ? 'fade-in' : ''} ${p.rank <= 3 ? 'top' + p.rank : ''}" style="animation-delay:${i * 0.05}s">
           <span class="pos num">${p.rank}</span>
           <span class="name"><span class="emoji" style="margin-right:8px">${avatar(p)}</span>${esc(p.name)}${p.connected ? '' : ' <span class="muted" style="font-weight:400;font-size:14px">· офлайн</span>'}</span>
+          ${!final && p.prevRank && p.prevRank !== p.rank ? `<span class="movement ${p.prevRank > p.rank ? 'up' : ''}">${p.prevRank > p.rank ? '↑' : '↓'}${Math.abs(p.prevRank - p.rank)}</span>` : ''}
           ${!final && p.lastPoints ? `<span class="delta num">+${fmt(p.lastPoints)}</span>` : ''}
           <span class="score num">${fmt(p.score)}</span>
         </div>`).join('')}</div>
+      ${final && s.teamMode ? `<h2>Личный рейтинг</h2><div class="board">${s.leaderboard.map(p => `<div class="row"><span class="pos">${p.rank}</span><span class="name">${avatar(p)} ${esc(p.name)}</span><span class="score">${fmt(p.score)}</span></div>`).join('')}</div>` : ''}
     </div>`;
+  animateLeaderboard($('#main'), list);
+  if (final && fresh) celebrate();
   if (final) setPrimary('Новая игра', () => act('reset'));
   else setPrimary('Следующий вопрос', () => act('next'));
 }
@@ -420,10 +453,22 @@ function tick() {
 
 // ---------- Управление ----------
 
+$('#teamBtn').addEventListener('click', () => act('teammode'));
+$('#pauseBtn').addEventListener('click', () => act(state.phase === 'paused' ? 'resume' : 'pause'));
+$('#boardBtn').addEventListener('click', () => act('board'));
+$('#hideBoardBtn').addEventListener('click', () => act('toggleboard'));
+$('#fullBtn').addEventListener('click', () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => toast('Полный экран недоступен')));
+let finishArmed = false;
+$('#finishBtn').addEventListener('click', () => {
+  if (finishArmed) { finishArmed = false; $('#finishBtn').textContent = 'Завершить игру'; return act('finish'); }
+  finishArmed = true; $('#finishBtn').textContent = 'Точно завершить?';
+  setTimeout(() => { finishArmed = false; $('#finishBtn').textContent = 'Завершить игру'; }, 3000);
+});
+
 $('#primary').addEventListener('click', () => primaryAction && primaryAction());
 
 document.addEventListener('keydown', (e) => {
-  if ((e.code === 'Space' || e.code === 'Enter') && !e.repeat && primaryAction && document.activeElement?.tagName !== 'INPUT') {
+  if ((e.code === 'Space' || e.code === 'Enter') && !PRESENT && !e.repeat && primaryAction && document.activeElement?.tagName !== 'INPUT') {
     e.preventDefault();
     primaryAction();
   }
@@ -431,7 +476,7 @@ document.addEventListener('keydown', (e) => {
 
 $('#main').addEventListener('click', (e) => {
   const chip = e.target.closest('#chips .chip');
-  if (!chip) return;
+  if (!chip || PRESENT) return;
   if (kickArmed === chip.dataset.id) {
     kickArmed = null;
     act('kick', { id: chip.dataset.id });

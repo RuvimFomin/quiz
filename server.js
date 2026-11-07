@@ -13,9 +13,12 @@ const IMAGES_DIR = path.join(__dirname, 'images');
 const QUESTIONS_FILE = path.join(__dirname, 'questions.json');
 // На публичном сервере задайте переменную HOST_PASSWORD — без неё экран ведущего откроется только с этого компьютера
 const HOST_PASSWORD = process.env.HOST_PASSWORD || '';
-const HOST_KEY = HOST_PASSWORD || crypto.randomBytes(3).toString('hex');
+const HOST_KEY = HOST_PASSWORD || crypto.randomBytes(24).toString('hex');
+const HOST_SESSION = crypto.randomBytes(32).toString('hex');
+const ROOM_CODE = String(crypto.randomInt(100000, 1000000));
 const MAX_PLAYERS = 50;
-const ANSWER_GRACE_MS = 600;
+const TEAMS = [{ id: 'light', name: 'Свет', emoji: '☀️' }, { id: 'hope', name: 'Надежда', emoji: '🌿' }, { id: 'faith', name: 'Вера', emoji: '🔥' }, { id: 'love', name: 'Любовь', emoji: '💛' }];
+
 
 fs.mkdirSync(IMAGES_DIR, { recursive: true });
 
@@ -25,17 +28,18 @@ function normalizeQuestion(q) {
   if (!q || typeof q !== 'object') return null;
   const text = String(q.question || '').trim();
   const answers = Array.isArray(q.answers)
-    ? q.answers.map((a) => String(a ?? '').trim()).slice(0, 6)
+    ? q.answers.map((a) => String(a ?? '').trim())
     : [];
   if (answers.some((a) => !a)) return null;
+  if (q.id != null && !['number', 'string'].includes(typeof q.id)) return null;
   const correct = Number(q.correct);
-  const time = Math.min(300, Math.max(5, Number(q.time) || 20));
+  const time = Math.min(300, Math.max(5, Number(q.time) || 30));
   const image = q.image ? path.basename(String(q.image)) : '';
   const explanation = String(q.explanation || '').trim();
-  if (!text || answers.length < 2 || !Number.isInteger(correct) || correct < 0 || correct >= answers.length) {
+  if (!text || answers.length !== 4 || !Number.isInteger(correct) || correct < 0 || correct >= answers.length) {
     return null;
   }
-  return { question: text, answers, correct, time, image, explanation };
+  return { id: q.id, category: String(q.category || '').trim(), question: text, answers, correct, time, image, explanation };
 }
 
 function loadTitle() {
@@ -61,16 +65,22 @@ function loadQuestions() {
   }
 }
 
-function saveQuestions(list) {
+function saveQuestions(list, title = loadTitle()) {
   const tmp = QUESTIONS_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ title: loadTitle(), questions: list }, null, 2), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify({ title, defaultTimeLimit: 30, questions: list }, null, 2), 'utf8');
   fs.renameSync(tmp, QUESTIONS_FILE);
 }
 
 // ---------- Состояние игры ----------
 
 const game = {
-  phase: 'lobby', // lobby | question | reveal | leaderboard | final
+  phase: 'lobby', // lobby | question | paused | closed | reveal | leaderboard | final
+  remaining: 0,
+  elapsed: 0,
+  leaderboardHidden: false,
+  teamMode: false,
+  teamRanks: new Map(),
+  rounds: [],
   index: -1,
   questions: loadQuestions(),
   startedAt: 0,
@@ -100,13 +110,20 @@ function leaderboard() {
     id: p.id,
     name: p.name,
     emoji: p.emoji,
-    photo: p.photo,
+    team: p.team,
     score: p.score,
     lastPoints: p.lastPoints,
     rank: i + 1,
     prevRank: p.prevRank,
     connected: isConnected(p),
   }));
+}
+
+function teamLeaderboard() {
+  return TEAMS.map(t => {
+    const members = [...players.values()].filter(p => p.team === t.id);
+    return { ...t, members: members.length, score: members.reduce((sum, p) => sum + p.score, 0), lastPoints: members.reduce((sum, p) => sum + p.lastPoints, 0), totalMs: members.reduce((sum, p) => sum + p.totalMs, 0), prevRank: game.teamRanks.get(t.id), connected: members.some(isConnected) };
+  }).filter(t => t.members).sort((a, b) => b.score - a.score || a.totalMs - b.totalMs || a.name.localeCompare(b.name, 'ru')).map((t, i) => ({ ...t, rank: i + 1 }));
 }
 
 function questionPayload(withCorrect) {
@@ -116,34 +133,38 @@ function questionPayload(withCorrect) {
     text: q.question,
     answers: q.answers,
     image: q.image ? '/images/' + encodeURIComponent(q.image) : '',
+    category: q.category,
     time: q.time,
-    remaining: Math.max(0, game.endsAt - Date.now()),
+    remaining: game.phase === 'paused' ? game.remaining : Math.max(0, game.endsAt - Date.now()),
     correct: withCorrect ? q.correct : undefined,
     explanation: withCorrect ? q.explanation : undefined,
   };
 }
 
 function playerView(p) {
-  const inQuestion = game.phase === 'question' || game.phase === 'reveal';
+  const inQuestion = ['question', 'paused', 'closed', 'reveal'].includes(game.phase);
   const a = game.answers.get(p.id);
   return {
     phase: game.phase,
     index: game.index,
     total: game.questions.length,
     playersCount: players.size,
-    me: { id: p.id, name: p.name, emoji: p.emoji, photo: p.photo, score: p.score, rank: rankOf(p.id) },
+    leaderboardHidden: game.leaderboardHidden,
+    teamMode: game.teamMode,
+    me: { id: p.id, name: p.name, emoji: p.emoji, team: TEAMS.find(t => t.id === p.team), score: p.score, rank: rankOf(p.id) },
     question: inQuestion ? questionPayload(game.phase === 'reveal') : null,
     myAnswer: a ? a.choice : null,
     result: game.phase === 'reveal' ? { correct: p.lastCorrect, points: p.lastPoints, answered: !!a } : null,
-    leaderboard: game.phase === 'leaderboard' || game.phase === 'final' ? leaderboard().slice(0, 10) : null,
+    teamLeaderboard: (game.phase === 'final' || (game.phase === 'leaderboard' && !game.leaderboardHidden)) && game.teamMode ? teamLeaderboard() : [],
+    leaderboard: (game.phase === 'final' || (game.phase === 'leaderboard' && !game.leaderboardHidden)) ? leaderboard() : [],
   };
 }
 
 function hostView() {
-  const inQuestion = game.phase === 'question' || game.phase === 'reveal';
+  const inQuestion = ['question', 'paused', 'closed', 'reveal'].includes(game.phase);
   const q = currentQuestion();
   let distribution = null;
-  if (game.phase === 'reveal' && q) {
+  if (['closed', 'reveal'].includes(game.phase) && q) {
     distribution = q.answers.map(() => 0);
     for (const a of game.answers.values()) distribution[a.choice]++;
   }
@@ -152,19 +173,23 @@ function hostView() {
     index: game.index,
     total: game.questions.length,
     title: loadTitle(),
-    question: inQuestion ? questionPayload(true) : null,
+    roomCode: ROOM_CODE,
+    leaderboardHidden: game.leaderboardHidden,
+    teamMode: game.teamMode,
+    question: inQuestion ? questionPayload(game.phase === 'reveal') : null,
     answeredCount: game.answers.size,
     distribution,
     players: [...players.values()].map((p) => ({
       id: p.id,
       name: p.name,
       emoji: p.emoji,
-      photo: p.photo,
+      team: p.team,
       score: p.score,
       connected: isConnected(p),
       answered: game.answers.has(p.id),
     })),
     leaderboard: leaderboard(),
+    teamLeaderboard: game.teamMode ? teamLeaderboard() : [],
     joinUrls: joinUrls(),
   };
 }
@@ -198,15 +223,26 @@ function startQuestion() {
   clearTimeout(game.timer);
   game.phase = 'question';
   game.answers.clear();
+  game.elapsed = 0;
+  game.remaining = q.time * 1000;
   game.startedAt = Date.now();
   game.endsAt = game.startedAt + q.time * 1000;
-  game.timer = setTimeout(reveal, q.time * 1000 + ANSWER_GRACE_MS);
+  game.timer = setTimeout(closeQuestion, q.time * 1000);
+  broadcast();
+}
+
+function closeQuestion() {
+  if (!['question', 'paused'].includes(game.phase)) return;
+  clearTimeout(game.timer);
+  game.phase = 'closed';
+  game.endsAt = Date.now();
   broadcast();
 }
 
 function reveal() {
-  if (game.phase !== 'question') return;
+  if (game.phase !== 'closed') return 'Сначала завершите приём ответов';
   clearTimeout(game.timer);
+  game.teamRanks = new Map(teamLeaderboard().map(t => [t.id, t.rank]));
   const ranks = new Map(ranking().map((p, i) => [p.id, i + 1]));
   for (const p of players.values()) {
     const a = game.answers.get(p.id);
@@ -217,6 +253,7 @@ function reveal() {
     // Общее время ответов — решает при равенстве очков (не ответил = всё время вопроса)
     p.totalMs += a ? a.ms : currentQuestion().time * 1000;
   }
+  game.rounds.push({ index: game.index, question: currentQuestion().question, answers: [...players.values()].map(p => ({ id: p.id, name: p.name, team: p.team, ...(game.answers.get(p.id) || { choice: null, ms: null, correct: false, points: 0 }) })) });
   game.phase = 'reveal';
   game.endsAt = Date.now();
   broadcast();
@@ -227,46 +264,70 @@ function submitAnswer(p, choice) {
   if (game.phase !== 'question' || !q) return 'Сейчас нельзя отвечать';
   if (game.answers.has(p.id)) return 'Ответ уже принят';
   if (!Number.isInteger(choice) || choice < 0 || choice >= q.answers.length) return 'Неверный вариант';
-  const ms = Date.now() - game.startedAt;
-  if (ms > q.time * 1000 + ANSWER_GRACE_MS) return 'Время вышло';
+  if (Date.now() >= game.endsAt) { closeQuestion(); return 'Время вышло'; }
+  const ms = game.elapsed + Date.now() - game.startedAt;
+  if (ms >= q.time * 1000) return 'Время вышло';
   const correct = choice === q.correct;
   // Верный ответ: от 1000 (мгновенно) до 500 (в последнюю секунду) очков
   const ratio = Math.min(1, ms / (q.time * 1000));
   const points = correct ? Math.round(1000 - 500 * ratio) : 0;
   game.answers.set(p.id, { choice, ms, correct, points });
 
-  const online = [...players.values()].filter(isConnected);
-  if (online.length > 0 && online.every((x) => game.answers.has(x.id))) {
-    clearTimeout(game.timer);
-    game.timer = setTimeout(reveal, 700); // все ответили — небольшая пауза и показываем ответ
-  }
   broadcast();
   return null;
 }
 
 const hostActions = {
   start() {
+    if (game.phase !== 'lobby') return 'Игра уже запущена';
+    game.rounds = [];
+    game.teamRanks.clear();
     game.questions = loadQuestions();
     if (!game.questions.length) return 'Нет вопросов — добавьте их в редакторе';
     for (const p of players.values()) Object.assign(p, { score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null });
     game.index = 0;
     startQuestion();
   },
-  reveal() {
-    reveal();
+  close() { closeQuestion(); },
+  pause() {
+    if (game.phase !== 'question') return 'Таймер не запущен';
+    if (Date.now() >= game.endsAt) { closeQuestion(); return; }
+    game.remaining = game.endsAt - Date.now();
+    game.elapsed += Date.now() - game.startedAt;
+    clearTimeout(game.timer);
+    game.phase = 'paused';
+    broadcast();
   },
+  resume() {
+    if (game.phase !== 'paused') return 'Нет паузы';
+    game.phase = 'question';
+    game.startedAt = Date.now();
+    game.endsAt = game.startedAt + game.remaining;
+    game.timer = setTimeout(closeQuestion, game.remaining);
+    broadcast();
+  },
+  reveal() { return reveal(); },
+  board() {
+    if (!['reveal', 'leaderboard'].includes(game.phase)) return 'Сначала раскройте ответ';
+    game.phase = 'leaderboard';
+    broadcast();
+  },
+  teammode() {
+    if (game.phase !== 'lobby') return 'Режим можно менять только до начала игры';
+    game.teamMode = !game.teamMode;
+    broadcast();
+  },
+  toggleboard() { game.leaderboardHidden = !game.leaderboardHidden; broadcast(); },
   next() {
-    if (game.phase === 'reveal') {
-      game.phase = game.index >= game.questions.length - 1 ? 'final' : 'leaderboard';
-      broadcast();
-    } else if (game.phase === 'leaderboard') {
-      game.index++;
-      startQuestion();
-    }
+    if (!['reveal', 'leaderboard'].includes(game.phase)) return 'Сначала раскройте ответ';
+    if (game.index >= game.questions.length - 1) game.phase = 'final';
+    else { game.index++; startQuestion(); return; }
+    broadcast();
   },
   finish() {
     clearTimeout(game.timer);
-    if (game.phase === 'question') reveal();
+    if (['question', 'paused'].includes(game.phase)) closeQuestion();
+    if (game.phase === 'closed') reveal();
     game.phase = 'final';
     broadcast();
   },
@@ -274,6 +335,9 @@ const hostActions = {
     clearTimeout(game.timer);
     game.questions = loadQuestions();
     game.phase = 'lobby';
+    game.rounds = [];
+    game.leaderboardHidden = false;
+    game.teamRanks.clear();
     game.index = -1;
     game.answers.clear();
     for (const p of players.values()) Object.assign(p, { score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null });
@@ -326,7 +390,7 @@ function joinUrls() {
 function isHost(req, url) {
   const addr = req.socket.remoteAddress || '';
   const local = !HOST_PASSWORD && (addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1');
-  return local || url.searchParams.get('key') === HOST_KEY || req.headers['x-host-key'] === HOST_KEY;
+  return local || req.headers['x-host-key'] === HOST_KEY || (req.headers.cookie || '').split(';').some((c) => c.trim() === 'quiz-host=' + HOST_SESSION);
 }
 
 function json(res, status, data) {
@@ -358,7 +422,7 @@ function readBody(req, limit = 20 * 1024 * 1024) {
 
 function serveFile(res, dir, rel) {
   const file = path.normalize(path.join(dir, rel));
-  if (!file.startsWith(dir)) return json(res, 403, { error: 'forbidden' });
+  if (!file.startsWith(dir + path.sep)) return json(res, 403, { error: 'forbidden' });
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -384,17 +448,6 @@ function openStream(req, res) {
   req.socket.setTimeout(0);
 }
 
-// Фото участников малой группы (public/people). Если имя совпадает — вместо эмодзи показываем фото.
-const PHOTOS = {
-  марк: 'mark.jpg',
-  анастасия: 'anastasia.jpg',
-  пашка: 'pashka.jpg',
-  полина: 'polina.jpg',
-  алексей: 'aleksey.jpg',
-  лигия: 'ligia.jpg',
-};
-const photoFor = (name) => (PHOTOS[name.toLowerCase()] ? '/people/' + PHOTOS[name.toLowerCase()] : '');
-
 const DEFAULT_EMOJI = ['😀', '😎', '🦊', '🐻', '🐼', '🦁', '🐯', '🐨', '🐸', '🦉', '🐬', '🦋'];
 
 function cleanEmoji(e) {
@@ -418,7 +471,9 @@ async function handleApi(req, res, url) {
   if (route === '/api/join' && req.method === 'POST') {
     const body = await readBody(req, 10_000);
     const existing = body.id && players.get(body.id);
-    if (existing && !body.name) return json(res, 200, { id: existing.id, name: existing.name });
+    if (existing && body.token !== existing.token) return json(res, 403, { error: 'Сессия не подтверждена' });
+    if (body.code && String(body.code) !== ROOM_CODE) return json(res, 400, { error: 'Неверный код игры' });
+    if (existing && !body.name) return json(res, 200, { id: existing.id, token: existing.token, name: existing.name });
 
     const name = cleanName(body.name);
     const emoji = cleanEmoji(body.emoji);
@@ -426,44 +481,47 @@ async function handleApi(req, res, url) {
     if (existing) {
       const clash = [...players.values()].find((p) => p.id !== existing.id && p.name.toLowerCase() === name.toLowerCase());
       if (clash) return json(res, 409, { error: 'Это имя уже занято' });
+      if (body.team && !TEAMS.some(t => t.id === body.team)) return json(res, 400, { error: 'Неизвестная команда' });
+      if (body.team && body.team !== existing.team && game.phase !== 'lobby') return json(res, 409, { error: 'Команду нельзя менять во время игры' });
+      if (body.team) existing.team = body.team;
       existing.name = name;
       existing.emoji = emoji;
-      existing.photo = photoFor(name);
       broadcast();
-      return json(res, 200, { id: existing.id, name });
+      return json(res, 200, { id: existing.id, token: existing.token, name });
     }
     const sameName = [...players.values()].find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (sameName) {
-      // Тот же ник, но игрок офлайн — вероятно, закрыл вкладку. Возвращаем его с сохранёнными очками.
-      if (!isConnected(sameName)) {
-        sameName.emoji = emoji;
-        return json(res, 200, { id: sameName.id, name: sameName.name });
-      }
       return json(res, 409, { error: 'Это имя уже занято' });
     }
     if (players.size >= MAX_PLAYERS) return json(res, 403, { error: 'Комната заполнена' });
     const id = crypto.randomUUID();
-    players.set(id, { id, name, emoji, photo: photoFor(name), score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null, streams: new Set() });
+    if (body.team && !TEAMS.some(t => t.id === body.team)) return json(res, 400, { error: 'Неизвестная команда' });
+    const team = body.team || [...TEAMS].sort((a, b) => [...players.values()].filter(p => p.team === a.id).length - [...players.values()].filter(p => p.team === b.id).length)[0].id;
+    const token = crypto.randomBytes(32).toString('hex');
+    players.set(id, { id, token, name, emoji, team, score: 0, totalMs: 0, lastPoints: 0, lastCorrect: false, prevRank: null, streams: new Set() });
     broadcast();
-    return json(res, 200, { id, name });
+    return json(res, 200, { id, token, name });
   }
 
   if (route === '/api/names' && req.method === 'GET') {
-    const taken = [...players.values()].filter(isConnected).map((p) => p.name.toLowerCase());
-    return json(res, 200, { taken, photos: Object.fromEntries(Object.entries(PHOTOS).map(([k, v]) => [k, '/people/' + v])) });
+    const taken = [...players.values()].map((p) => p.name.toLowerCase());
+    return json(res, 200, { taken, teamMode: game.teamMode, teams: TEAMS });
   }
 
   if (route === '/api/answer' && req.method === 'POST') {
     const body = await readBody(req, 10_000);
     const p = players.get(body.id);
-    if (!p) return json(res, 404, { error: 'Игрок не найден' });
-    const error = submitAnswer(p, Number(body.choice));
+    if (!p || body.token !== p.token) return json(res, 403, { error: 'Сессия не подтверждена' });
+    if (body.index !== game.index) return json(res, 409, { error: 'Этот вопрос уже завершён' });
+    const error = submitAnswer(p, body.choice);
     return error ? json(res, 409, { error }) : json(res, 200, { ok: true });
   }
 
   if (route === '/api/leave' && req.method === 'POST') {
     const body = await readBody(req, 10_000);
     const p = players.get(body.id);
+    if (!p || body.token !== p.token) return json(res, 403, { error: 'Сессия не подтверждена' });
+    if (game.phase !== 'lobby') return json(res, 409, { error: 'Выход из игры доступен в лобби' });
     if (p) {
       for (const s of p.streams) s.end();
       players.delete(p.id);
@@ -476,7 +534,17 @@ async function handleApi(req, res, url) {
   // --- Всё ниже доступно только ведущему ---
   if (!isHost(req, url)) return json(res, 403, { error: 'Только для ведущего' });
 
-  if (route === '/api/host/check') return json(res, 200, { ok: true });
+  if (route === '/api/host/check') {
+    res.setHeader('Set-Cookie', `quiz-host=${HOST_SESSION}; HttpOnly; SameSite=Strict; Path=/${(process.env.RENDER_EXTERNAL_URL || '').startsWith('https:') ? '; Secure' : ''}`);
+    return json(res, 200, { ok: true });
+  }
+  if (route === '/api/results.csv' && req.method === 'GET') {
+    const cell = (v) => '"' + String(v ?? '').replace(/^[=+@-]/, "'$&").replace(/"/g, '""') + '"';
+    const rows = [['Место', 'Имя', 'Очки'], ...leaderboard().map(p => [p.rank, p.name, p.score]), [], ['Вопрос', 'Игрок', 'Вариант', 'Верно', 'Очки', 'Время, мс']];
+    for (const r of game.rounds) for (const a of r.answers) rows.push([r.index + 1, a.name, 'АБВГ'[a.choice], a.correct ? 'Да' : 'Нет', a.points, a.ms]);
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="quiz-results.csv"', 'Cache-Control': 'no-store' });
+    return res.end('\uFEFF' + rows.map(r => r.map(cell).join(',')).join('\r\n'));
+  }
 
   const hostMatch = route.match(/^\/api\/host\/(\w+)$/);
   if (hostMatch && req.method === 'POST' && hostActions[hostMatch[1]]) {
@@ -486,7 +554,7 @@ async function handleApi(req, res, url) {
   }
 
   if (route === '/api/questions' && req.method === 'GET') {
-    return json(res, 200, { questions: loadQuestions() });
+    return json(res, 200, { title: loadTitle(), defaultTimeLimit: 30, questions: loadQuestions() });
   }
 
   if (route === '/api/questions' && req.method === 'PUT') {
@@ -495,10 +563,14 @@ async function handleApi(req, res, url) {
     }
     const body = await readBody(req, 2 * 1024 * 1024);
     const list = Array.isArray(body.questions) ? body.questions : [];
+    if (!list.length || list.length > 200) return json(res, 400, { error: 'Нужно от 1 до 200 вопросов' });
     const normalized = list.map(normalizeQuestion);
     const bad = normalized.findIndex((q) => !q);
     if (bad !== -1) return json(res, 400, { error: `Вопрос №${bad + 1} заполнен не полностью` });
-    saveQuestions(normalized);
+    const ids = normalized.map(q => q.id).filter(id => id != null);
+    if (new Set(ids).size !== ids.length) return json(res, 400, { error: 'ID вопросов повторяются' });
+    if (body.title !== undefined && (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200)) return json(res, 400, { error: 'Название квиза: от 1 до 200 символов' });
+    saveQuestions(normalized, body.title?.trim());
     game.questions = normalized;
     broadcast();
     return json(res, 200, { ok: true, count: normalized.length });
@@ -518,16 +590,15 @@ async function handleApi(req, res, url) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const route = decodeURIComponent(url.pathname);
-
   try {
+    const url = new URL(req.url, 'http://localhost');
+    const route = decodeURIComponent(url.pathname);
     if (route === '/events') {
       const playerId = url.searchParams.get('player');
       if (playerId) {
         const p = players.get(playerId);
         openStream(req, res);
-        if (!p) {
+        if (!p || url.searchParams.get('token') !== p.token) {
           send(res, {}, 'unknown');
           return res.end();
         }
@@ -550,6 +621,8 @@ const server = http.createServer(async (req, res) => {
 
     if (route.startsWith('/api/')) return await handleApi(req, res, url);
     if (route === '/' || route === '/play') return serveFile(res, PUBLIC_DIR, 'index.html');
+    if (route === '/present') return serveFile(res, PUBLIC_DIR, 'host.html');
+    if (route.startsWith('/people/')) return json(res, 404, { error: 'Не найдено' });
     if (route === '/host') return serveFile(res, PUBLIC_DIR, 'host.html');
     if (route === '/editor') return serveFile(res, PUBLIC_DIR, 'editor.html');
     if (route.startsWith('/images/')) return serveFile(res, IMAGES_DIR, route.slice('/images/'.length));
@@ -568,7 +641,8 @@ server.listen(PORT, '0.0.0.0', () => {
   if (urls.length) {
     console.log(`\n  Участникам (телефон/ПК в той же Wi‑Fi сети):`);
     for (const u of urls) console.log(`     ${u}`);
-    console.log(`\n  Управлять с другого устройства:\n     ${urls[0]}/host?key=${HOST_KEY}`);
+    console.log(`\n  Управлять с другого устройства: ${urls[0]}/host`);
+    if (!HOST_PASSWORD) console.log(`  Одноразовый пароль ведущего: ${HOST_KEY}`);
   } else {
     console.log('\n  ⚠️  Компьютер не подключён к сети — участники не смогут войти.');
   }

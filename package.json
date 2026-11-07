@@ -5,9 +5,15 @@
   "description": "Квиз для мероприятия",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node scripts/check.js",
+    "test": "node scripts/check.js && node --test tests/game.test.js",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0"
   }
 }

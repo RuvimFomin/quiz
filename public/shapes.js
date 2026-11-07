@@ -8,12 +8,12 @@ const SHAPES = [
   '<path d="M12 2.8l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17l-5.6 3 1.1-6.2L3 9.4l6.2-.9z"/>',
 ];
 function shape(i) {
-  return `<span class="shape c${i}"><svg viewBox="0 0 24 24">${SHAPES[i % SHAPES.length]}</svg></span>`;
+  return `<span class="shape c${i}" aria-hidden="true"><b>${['А', 'Б', 'В', 'Г'][i] || i + 1}</b></span>`;
 }
 
-// Аватар участника: фото, если есть, иначе эмодзи
 function avatar(p, cls = '') {
-  return p.photo
-    ? `<img class="ava ${cls}" src="${p.photo}" alt="">`
-    : `<span class="${cls}">${p.emoji}</span>`;
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = p.emoji || '🙂';
+  return span.outerHTML;
 }
