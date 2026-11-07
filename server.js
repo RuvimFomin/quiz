@@ -17,6 +17,8 @@ const HOST_KEY = HOST_PASSWORD || crypto.randomBytes(24).toString('hex');
 const HOST_SESSION = crypto.randomBytes(32).toString('hex');
 const ROOM_CODE = String(crypto.randomInt(100000, 1000000));
 const MAX_PLAYERS = 50;
+const RANK_PAGE_SIZE = 20;
+const RANK_PAGE_MS = 8000;
 const TEAMS = [{ id: 'light', name: 'Свет', emoji: '☀️' }, { id: 'hope', name: 'Надежда', emoji: '🌿' }, { id: 'faith', name: 'Вера', emoji: '🔥' }, { id: 'love', name: 'Любовь', emoji: '💛' }];
 
 
@@ -79,6 +81,10 @@ const game = {
   elapsed: 0,
   leaderboardHidden: false,
   teamMode: false,
+  rankPage: 0,
+  rankAuto: true,
+  rankKey: '',
+  rankTimer: null,
   teamRanks: new Map(),
   rounds: [],
   index: -1,
@@ -191,6 +197,7 @@ function hostView() {
     leaderboard: leaderboard(),
     teamLeaderboard: game.teamMode ? teamLeaderboard() : [],
     joinUrls: joinUrls(),
+    ranking: { page: game.rankPage, pages: rankingSlides().length, auto: game.rankAuto, interval: RANK_PAGE_MS, slide: rankingSlides()[game.rankPage] },
   };
 }
 
@@ -202,13 +209,48 @@ function send(res, data, event) {
   } catch (_) {}
 }
 
+function rankingSlides() {
+  if (!['leaderboard', 'final'].includes(game.phase)) return [];
+  const slides = [];
+  if (game.phase === 'final') slides.push({ kind: 'podium' });
+  if (game.teamMode) slides.push({ kind: 'teams' });
+  for (let from = 0; from < Math.max(1, players.size); from += RANK_PAGE_SIZE) {
+    slides.push({ kind: 'players', from, to: Math.min(from + RANK_PAGE_SIZE, players.size) });
+  }
+  return slides;
+}
+
+function broadcastHosts() {
+  const view = hostView();
+  for (const res of hostStreams) send(res, view);
+}
+
+function syncRankingPager() {
+  const slides = rankingSlides();
+  const hidden = game.phase !== 'final' && game.leaderboardHidden;
+  const key = slides.length ? [game.phase, game.index, game.teamMode, hidden, slides.length].join(':') : '';
+  if (key !== game.rankKey) {
+    clearTimeout(game.rankTimer); game.rankTimer = null;
+    game.rankKey = key; game.rankPage = 0; game.rankAuto = true;
+  }
+  if (!key || hidden || !game.rankAuto || slides.length < 2) {
+    clearTimeout(game.rankTimer); game.rankTimer = null; return;
+  }
+  if (!game.rankTimer) game.rankTimer = setTimeout(() => {
+    game.rankTimer = null;
+    game.rankPage = (game.rankPage + 1) % rankingSlides().length;
+    syncRankingPager();
+    broadcastHosts();
+  }, RANK_PAGE_MS);
+}
+
 function broadcast() {
+  syncRankingPager();
   for (const p of players.values()) {
     const view = playerView(p);
     for (const res of p.streams) send(res, view);
   }
-  const hv = hostView();
-  for (const res of hostStreams) send(res, hv);
+  broadcastHosts();
 }
 
 setInterval(() => {
@@ -316,6 +358,17 @@ const hostActions = {
     if (game.phase !== 'lobby') return 'Режим можно менять только до начала игры';
     game.teamMode = !game.teamMode;
     broadcast();
+  },
+  ranking(body) {
+    if (!['leaderboard', 'final'].includes(game.phase)) return 'Сначала откройте рейтинг';
+    const pages = rankingSlides().length;
+    if (body.move === 1 || body.move === -1) {
+      game.rankPage = (game.rankPage + body.move + pages) % pages;
+      game.rankAuto = false;
+    } else if (typeof body.auto === 'boolean') game.rankAuto = body.auto;
+    else return 'Укажите страницу или автопоказ';
+    clearTimeout(game.rankTimer); game.rankTimer = null;
+    syncRankingPager(); broadcastHosts();
   },
   toggleboard() { game.leaderboardHidden = !game.leaderboardHidden; broadcast(); },
   next() {

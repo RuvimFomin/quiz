@@ -43,9 +43,15 @@ function observe(page, label) {
     networkErrors.push({ label, path: new URL(req.url()).pathname, reason });
   });
 }
+async function browserJson(route, body) {
+  return host.evaluate(async ({ route, body }) => {
+    const response = await fetch(route, { method: body === undefined ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, data: await response.json() };
+  }, { route, body });
+}
 async function admin(action, body = {}) {
-  const response = await adminContext.request.post(base + '/api/host/' + action, { data: body });
-  assert.equal(response.status(), 200, action);
+  const response = await browserJson('/api/host/' + action, body);
+  assert.equal(response.status, 200, action);
 }
 async function state(page) { return page.evaluate(() => ({ phase: state.phase, index: state.index, score: state.me?.score, name: state.me?.name, emoji: state.me?.emoji, answer: state.myAnswer, points: state.result?.points, correct: state.result?.correct, questionHasKey: state.question ? 'correct' in state.question : false })); }
 async function screenshot(page, name) {
@@ -61,7 +67,7 @@ async function cleanup() {
       if (ownsGame) await admin('reset');
       const ownPlayers = await host.evaluate(prefix => state?.players?.filter(p => p.name.startsWith(prefix)).map(p => p.id) || [], 'MB' + runId + '-');
       for (const id of ownPlayers) await admin('kick', { id });
-      const names = await (await adminContext.request.get(base + '/api/names')).json();
+      const names = (await browserJson('/api/names')).data;
       check('All own test profiles removed', !names.taken.some(n => n.startsWith('mb' + runId + '-')));
     } catch (e) { errors.push('Cleanup: ' + scrub(e.message)); }
   }
@@ -73,10 +79,10 @@ async function cleanup() {
     browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : process.platform === 'darwin' ? { channel: 'chrome' } : {}), args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
     report.browserVersion = browser.version();
     adminContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, baseURL: base });
-    const auth = await adminContext.request.get('/api/host/check', { headers: { 'X-Host-Key': key } }); key = '';
-    assert.equal(auth.status(), 200, 'Host password');
     host = await adminContext.newPage(); observe(host, 'host');
     await host.goto(base + '/host');
+    await host.getByPlaceholder('Пароль ведущего').fill(key);
+    await host.getByRole('button', { name: 'Войти', exact: true }).click(); key = '';
     await host.waitForFunction(() => typeof state !== 'undefined' && state !== null);
     let initial = await host.evaluate(() => ({ phase: state.phase, count: state.players.length }));
     report.initialRoom = initial;
@@ -91,7 +97,7 @@ async function cleanup() {
     if (process.argv.includes('--inspect')) { report.mode = 'preflight'; console.log(JSON.stringify({ room: initial })); return; }
     check('Room starts empty in lobby', initial.phase === 'lobby' && initial.count === 0);
     ownsGame = true;
-    const content = await (await adminContext.request.get('/api/questions')).json();
+    const content = (await browserJson('/api/questions')).data;
     assert.equal(content.questions.length, 25);
     presenter = await adminContext.newPage(); observe(presenter, 'presenter');
     await presenter.setViewportSize({ width: 1920, height: 1080 }); await presenter.goto(base + '/present');

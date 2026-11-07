@@ -168,6 +168,12 @@
   <button class="btn" id="primary"></button>
   <button class="btn ghost" id="pauseBtn" hidden></button>
   <button class="btn ghost" id="boardBtn" hidden>Рейтинг</button>
+  <div class="rank-controls" id="rankControls" hidden>
+    <span id="rankStatus"></span>
+    <button class="btn small ghost" id="rankPrev" aria-label="Предыдущая страница рейтинга">←</button>
+    <button class="btn small ghost" id="rankAuto"></button>
+    <button class="btn small ghost" id="rankNext" aria-label="Следующая страница рейтинга">→</button>
+  </div>
   <button class="btn ghost" id="hideBoardBtn" hidden></button>
   <span class="hint">или нажмите пробел</span>
 </div>
@@ -250,6 +256,13 @@ function render(s) {
   $('#csvLink').hidden = s.phase !== 'final';
   $('#pauseBtn').hidden = !['question', 'paused'].includes(s.phase);
   $('#pauseBtn').textContent = s.phase === 'paused' ? '▶ Продолжить' : 'Ⅱ Пауза';
+  const onBoard = ['leaderboard', 'final'].includes(s.phase);
+  $('#rankControls').hidden = !onBoard;
+  if (onBoard) {
+    $('#rankStatus').textContent = 'На проекторе ' + (s.ranking.page + 1) + ' / ' + s.ranking.pages;
+    $('#rankAuto').textContent = s.ranking.auto ? 'Ⅱ Остановить листание' : '▶ Автолистание';
+    $('#rankPrev').disabled = $('#rankNext').disabled = s.ranking.pages < 2;
+  }
   $('#boardBtn').hidden = s.phase !== 'reveal';
   $('#hideBoardBtn').hidden = !['reveal', 'leaderboard'].includes(s.phase);
   $('#hideBoardBtn').textContent = s.leaderboardHidden ? 'Показать рейтинг' : 'Скрыть рейтинг';
@@ -396,10 +409,11 @@ function renderBoard(s, fresh) {
   stopTimer();
   const final = s.phase === 'final';
   const list = PRESENT && s.leaderboardHidden && !final ? [] : s.teamMode ? s.teamLeaderboard : s.leaderboard;
-  const shown = final ? list : list.slice(0, 5);
+  if (PRESENT) return renderProjectorBoard(s, fresh);
+  const shown = list;
   $('#main').innerHTML = `
     <div class="lb ${fresh ? 'fade-in' : ''}">
-      <h1>${final ? 'Победители' : PRESENT && s.leaderboardHidden ? 'Сохраним интригу 🤫' : s.teamMode ? 'Командный рейтинг' : 'Пятёрка лидеров'}</h1>
+      <h1>${final ? 'Победители' : PRESENT && s.leaderboardHidden ? 'Сохраним интригу 🤫' : s.teamMode ? 'Командный рейтинг' : 'Рейтинг всех участников'}</h1>
       ${final ? `<div class="podium">${list.slice(0, 3).map((p, i) => `
         <div class="place p${i + 1} ${fresh ? 'pop' : ''}" style="animation-delay:${(2 - i) * 0.5}s">
           <div style="font-size:52px;line-height:1">${avatar(p)}</div>
@@ -419,6 +433,26 @@ function renderBoard(s, fresh) {
   if (final && fresh) celebrate();
   if (final) setPrimary('Новая игра', () => act('reset'));
   else setPrimary('Следующий вопрос', () => act('next'));
+}
+
+function renderProjectorBoard(s, fresh) {
+  const hidden = s.phase !== 'final' && s.leaderboardHidden;
+  const slide = s.ranking.slide;
+  const podium = !hidden && slide.kind === 'podium';
+  const teams = !hidden && slide.kind === 'teams';
+  const list = hidden ? [] : podium ? (s.teamMode ? s.teamLeaderboard : s.leaderboard).slice(0, 3) : teams ? s.teamLeaderboard : s.leaderboard.slice(slide.from, slide.to);
+  const title = hidden ? 'Сохраним интригу 🤫' : podium ? 'Победители' : teams ? 'Командный рейтинг' : 'Рейтинг всех участников';
+  const oldPage = $('#main').dataset.rankPage;
+  const pageChanged = oldPage !== String(s.ranking.page);
+  $('#main').dataset.rankPage = s.ranking.page;
+  $('#main').innerHTML = `<section class="projected-ranking ${fresh || pageChanged ? 'fade-in' : ''}" aria-label="Рейтинг на проекторе">
+    <header class="projected-head"><div><p class="eyebrow">${s.phase === 'final' ? 'Итоги квиза' : 'После вопроса ' + (s.index + 1) + ' / ' + s.total}</p><h1>${title}</h1></div><span class="projected-total">${s.leaderboard.length} участников</span></header>
+    ${podium ? `<div class="podium projected-podium">${list.map((p, i) => `<div class="place p${i + 1}"><div class="winner-emoji">${avatar(p)}</div><div class="who">${esc(p.name)}</div><div class="pts num">${fmt(p.score)} баллов</div><div class="step">${p.rank}</div></div>`).join('')}</div>` : `<div class="board projected-rows ${list.length <= 10 ? 'single' : ''}">${list.map(p => `<div class="row ${p.rank <= 3 ? 'top' + p.rank : ''}" data-player="${p.id}" data-rank="${p.rank}"><span class="pos num">${p.rank}</span><span class="name">${avatar(p, 'emoji')} ${esc(p.name)}</span>${p.prevRank && p.prevRank !== p.rank ? `<span class="movement ${p.prevRank > p.rank ? 'up' : ''}">${p.prevRank > p.rank ? '↑' : '↓'}${Math.abs(p.prevRank - p.rank)}</span>` : ''}<span class="score num">${fmt(p.score)}</span></div>`).join('')}</div>`}
+    <footer class="projected-footer"><span>${hidden ? 'Рейтинг скрыт ведущим' : podium ? 'Тройка победителей' : teams ? 'Места команд' : s.leaderboard.length ? 'Места ' + (slide.from + 1) + '–' + slide.to + ' из ' + s.leaderboard.length : 'Нет участников'}</span><span>${s.ranking.page + 1} / ${s.ranking.pages} · ${s.ranking.auto && s.ranking.pages > 1 ? 'Смена каждые ' + s.ranking.interval / 1000 + ' с' : 'Управляет ведущий'}</span></footer>
+  </section>`;
+  animateLeaderboard($('#main'), list);
+  if (s.phase === 'final' && fresh) celebrate();
+  setPrimary(null, null);
 }
 
 function plural(n, one, few, many) {
@@ -453,6 +487,9 @@ function tick() {
 
 // ---------- Управление ----------
 
+$('#rankPrev').addEventListener('click', () => act('ranking', { move: -1 }));
+$('#rankNext').addEventListener('click', () => act('ranking', { move: 1 }));
+$('#rankAuto').addEventListener('click', () => act('ranking', { auto: !state.ranking.auto }));
 $('#teamBtn').addEventListener('click', () => act('teammode'));
 $('#pauseBtn').addEventListener('click', () => act(state.phase === 'paused' ? 'resume' : 'pause'));
 $('#boardBtn').addEventListener('click', () => act('board'));
